@@ -1,0 +1,35 @@
+.venv# Secrets
+.env
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Models & indices (large binary artifacts)
+models/*.bin
+models/*.safetensors
+models/*.pt
+models/checkpoints/
+faiss_index/
+*.faiss
+*.index
+
+# Logs & experiments
+logs/*.log
+logs/*.jsonl
+experiments/runs/
+diagnostics/*.png
+diagnostics/*.json
+
+# HuggingFace streaming cache leak guard (we stream-only, but just in case)
+.cache/
+~/.cache/huggingface/
+
+# OS
+.DS_Store
+Thumbs.db

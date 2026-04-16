@@ -1,0 +1,1 @@
+"""Data loaders — streaming only, no disk caching."""
