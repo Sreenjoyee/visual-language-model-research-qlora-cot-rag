@@ -224,11 +224,12 @@ class MedPixSource(KnowledgeSource):
     name = "medpix"
 
     _DATASET_IDS: list[str] = [
+        "ChayanM/IUXray-Data-Train-Test",
         "projectnateryan/iu_xray",
         "Soobin-Kim/iu_xray",
         "openi/chest-xray",
     ]
-    _TEXT_COLS: list[str] = ["findings", "impression", "report", "text"]
+    _TEXT_COLS: list[str] = ["Caption", "findings", "impression", "report", "text"]
 
     def __init__(self, max_snippets: int = 2000):
         self.max_snippets = max_snippets

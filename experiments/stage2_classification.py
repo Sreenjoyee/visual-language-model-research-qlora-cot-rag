@@ -41,6 +41,7 @@ from pathlib import Path
 
 import torch
 from torch.optim import AdamW
+from transformers import get_cosine_schedule_with_warmup
 
 from src.config import CONFIG, Config
 from src.data.balanced_stream import LabeledPair, balanced_mimic_stream, check_label_distribution
@@ -180,6 +181,26 @@ def _encode_example(
 
 # ── Training loop ──────────────────────────────────────────────────────────
 
+def _save_checkpoint_s2(
+    ckpt_dir: Path,
+    model,
+    optimizer: AdamW,
+    scheduler,
+    step: int,
+    epoch: int,
+) -> None:
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    # LoRA adapter weights (via peft)
+    model.save_pretrained(str(ckpt_dir))
+    # Optimizer + scheduler state alongside the adapter
+    torch.save({
+        "step": step, "epoch": epoch,
+        "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict(),
+    }, ckpt_dir / "train_state.pt")
+    print(f"[stage2] Checkpoint saved → {ckpt_dir}  (step {step})")
+
+
 def train(
     config: Config,
     projector_path: Path | None,
@@ -189,6 +210,10 @@ def train(
     log_every: int,
     lora_save_dir: Path,
     balance_check_samples: int,
+    warmup_steps: int = 100,
+    save_every: int = 500,
+    resume_from: Path | None = None,
+    grad_accum_steps: int = 1,
 ) -> None:
     config.validate()
 
@@ -245,26 +270,48 @@ def train(
     check_label_distribution(check_samples)
     print("[stage2] Label distribution OK.")
 
-    # Optimizer over LoRA params only
+    # Optimizer + cosine scheduler over LoRA params only
     lora_params = [p for p in llm.model.parameters() if p.requires_grad]
-    lora_count = sum(p.numel() for p in lora_params)
-    print(f"[stage2] Trainable LoRA params: {lora_count:,}")
+    print(f"[stage2] Trainable LoRA params: {sum(p.numel() for p in lora_params):,}")
     optimizer = AdamW(lora_params, lr=lr, weight_decay=0.01)
 
-    log_path = config.logs_dir / "stage2.jsonl"
-    log_f = open(log_path, "w", encoding="utf-8")
+    total_steps = epochs * max_pairs // max(grad_accum_steps, 1)
+    scheduler = get_cosine_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=warmup_steps,
+        num_training_steps=total_steps,
+    )
 
+    # ── Resume from checkpoint ────────────────────────────────────────────────
     global_step = 0
+    start_epoch = 0
+    if resume_from is not None and resume_from.exists():
+        train_state = resume_from / "train_state.pt"
+        if train_state.exists():
+            ckpt = torch.load(train_state, map_location="cpu")
+            optimizer.load_state_dict(ckpt["optimizer"])
+            scheduler.load_state_dict(ckpt["scheduler"])
+            global_step  = ckpt["step"]
+            start_epoch  = ckpt["epoch"]
+            print(f"[stage2] Resumed from {resume_from}  (step={global_step}, epoch={start_epoch})")
+        else:
+            print(f"[stage2] WARNING: resume_from given but no train_state.pt found at {resume_from}")
+
+    log_path = config.logs_dir / "stage2.jsonl"
+    log_mode = "a" if resume_from is not None else "w"
+    log_f = open(log_path, log_mode, encoding="utf-8")
+
     t_start = time.time()
     first_step_grad_checked = False
+    accum_loss = 0.0
+    micro_step = 0
 
-    for epoch in range(epochs):
+    for epoch in range(start_epoch, epochs):
         print(f"[stage2] === Epoch {epoch + 1}/{epochs} ===")
+        optimizer.zero_grad(set_to_none=True)
 
         stream = balanced_mimic_stream(config, split="train", max_pairs=max_pairs)
         for pair in stream:
-            optimizer.zero_grad(set_to_none=True)
-
             try:
                 batch = _encode_example(pair, vision, projector, llm, retriever, config)
             except Exception as e:
@@ -281,14 +328,19 @@ def train(
                 print(f"[stage2] step {global_step}: non-finite loss, skipping")
                 continue
 
-            loss.backward()
+            scaled_loss = loss / grad_accum_steps
+            scaled_loss.backward()
+            accum_loss += loss.item()
+            micro_step += 1
 
-            # First-step: verify LoRA params receive gradients (SRS §19.2 module-6)
+            if micro_step % grad_accum_steps != 0:
+                continue   # accumulate more before updating
+
+            # ── Parameter update ──────────────────────────────────────────────
             if not first_step_grad_checked:
                 total_g = sum(
                     p.grad.detach().abs().sum().item()
-                    for p in lora_params
-                    if p.grad is not None
+                    for p in lora_params if p.grad is not None
                 )
                 if total_g == 0.0:
                     raise RuntimeError(
@@ -299,38 +351,46 @@ def train(
 
             torch.nn.utils.clip_grad_norm_(lora_params, max_norm=1.0)
             optimizer.step()
+            scheduler.step()
+            optimizer.zero_grad(set_to_none=True)
 
+            avg_loss = accum_loss / grad_accum_steps
+            accum_loss = 0.0
             global_step += 1
+
             if global_step % log_every == 0:
                 vram_gb = (
                     torch.cuda.memory_allocated(llm.device) / (1024 ** 3)
                     if llm.device.type == "cuda" else 0.0
                 )
-                elapsed = time.time() - t_start
+                current_lr = scheduler.get_last_lr()[0]
                 row = {
-                    "step": global_step,
-                    "epoch": epoch,
-                    "loss": round(float(loss.item()), 4),
+                    "step": global_step, "epoch": epoch,
+                    "loss": round(avg_loss, 4),
+                    "lr": round(current_lr, 8),
                     "label": pair.label,
                     "vram_gb": round(vram_gb, 2),
-                    "elapsed_s": round(elapsed, 1),
+                    "elapsed_s": round(time.time() - t_start, 1),
                 }
                 print(
                     f"[stage2] step {global_step:5d} | loss {row['loss']:.4f} "
-                    f"| label {pair.label:<8} | vram {row['vram_gb']:.2f}GB"
+                    f"| lr {current_lr:.2e} | label {pair.label:<8} | vram {row['vram_gb']:.2f}GB"
                 )
                 log_f.write(json.dumps(row) + "\n")
                 log_f.flush()
 
+            # ── Mid-training checkpoint ───────────────────────────────────────
+            if save_every > 0 and global_step % save_every == 0:
+                ckpt_dir = lora_save_dir.parent / f"lora_step{global_step}"
+                _save_checkpoint_s2(ckpt_dir, llm.model, optimizer, scheduler, global_step, epoch)
+
     log_f.close()
 
-    # Save LoRA adapter only — separate from projector (SRS §15)
+    # Final save — LoRA adapter only (SRS §15: checkpoint separation)
     lora_save_dir.mkdir(parents=True, exist_ok=True)
     llm.model.save_pretrained(str(lora_save_dir))
-    print(f"[stage2] LoRA adapter saved to {lora_save_dir}")
-    print(
-        f"[stage2] Projector NOT saved here — load from {projector_path} for inference."
-    )
+    print(f"[stage2] Final LoRA adapter saved → {lora_save_dir}")
+    print(f"[stage2] Projector NOT re-saved here — load from {projector_path} for inference.")
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────
@@ -344,22 +404,21 @@ def main() -> int:
         help="Path to Stage-1 projector checkpoint.",
     )
     ap.add_argument("--max-pairs", type=int, default=4000,
-                    help="Balanced pairs per epoch (split equally NORMAL/ABNORMAL).")
+                    help="Balanced pairs per epoch (NORMAL:ABNORMAL = 1:1).")
     ap.add_argument("--epochs", type=int, default=2)
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--log-every", type=int, default=25)
-    ap.add_argument(
-        "--lora-save-dir",
-        type=Path,
-        default=CONFIG.models_dir / "lora_stage2",
-        help="Directory to save the LoRA adapter.",
-    )
-    ap.add_argument(
-        "--balance-check-samples",
-        type=int,
-        default=100,
-        help="Number of samples to collect for pre-training balance check.",
-    )
+    ap.add_argument("--warmup-steps", type=int, default=100,
+                    help="Linear warmup steps before cosine decay.")
+    ap.add_argument("--save-every", type=int, default=500,
+                    help="Save mid-training checkpoint every N optimizer steps (0 = off).")
+    ap.add_argument("--resume-from", type=Path, default=None,
+                    help="LoRA checkpoint directory to resume from (must contain train_state.pt).")
+    ap.add_argument("--grad-accum-steps", type=int, default=1,
+                    help="Gradient accumulation steps (effective batch size multiplier).")
+    ap.add_argument("--lora-save-dir", type=Path,
+                    default=CONFIG.models_dir / "lora_stage2")
+    ap.add_argument("--balance-check-samples", type=int, default=100)
     args = ap.parse_args()
 
     try:
@@ -372,6 +431,10 @@ def main() -> int:
             log_every=args.log_every,
             lora_save_dir=args.lora_save_dir,
             balance_check_samples=args.balance_check_samples,
+            warmup_steps=args.warmup_steps,
+            save_every=args.save_every,
+            resume_from=args.resume_from,
+            grad_accum_steps=args.grad_accum_steps,
         )
     except KeyboardInterrupt:
         print("\n[stage2] Interrupted by user.")
