@@ -32,7 +32,10 @@ class Config:
     )
 
     # --- Model IDs ---
-    vision_model_id: str = "google/vit-base-patch16-224"
+    # SRS §5: frozen lightweight vision encoder, outputs spatial tokens.
+    # EfficientNet-B0: 5.3M params, CNN backbone, ImageNet pretrained.
+    # Output: last_hidden_state (B, 1280, 7, 7) at 224×224 → reshaped to (B, 49, 1280).
+    vision_model_id: str = "google/efficientnet-b0"
     llm_model_id: str = "meta-llama/Llama-3.2-3B-Instruct"
     embedder_model_id: str = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -40,8 +43,12 @@ class Config:
     image_size: int = 224
 
     # --- Projector (Perceiver Resampler) ---
-    # ViT-B/16 last_hidden_state: (B, 197, 768) at 224x224 input (14x14 patches + 1 cls token, 768 channels)
-    vision_hidden_dim: int = 768
+    # EfficientNet-B0 final feature map: 1280 channels.
+    # Spatial map 7×7=49 tokens after reshape from (B,1280,7,7) → (B,49,1280).
+    # Token count N is read dynamically — projector cross-attention handles any N.
+    # num_heads=8 divides evenly into 1280 (1280/8=160).
+    # SRS §19.2 projector output: (B, 8, 3072).
+    vision_hidden_dim: int = 1280
     num_visual_tokens: int = 8           # compressed visual tokens passed to LLM
     projector_num_heads: int = 8
     projector_num_layers: int = 2
@@ -83,6 +90,14 @@ class Config:
     # open question; switch to sampling in evaluation configs, not here.
     do_sample: bool = False
     temperature: float = 0.0
+
+    # --- External API ---
+    pubmed_email: str = "meddiag-research@noreply.local"  # NCBI requests an email
+
+    # --- Debug ---
+    debug_vision: bool = field(
+        default_factory=lambda: bool(os.environ.get("MEDDIAG_DEBUG_VISION"))
+    )
 
     # --- Paths ---
     logs_dir: Path = PROJECT_ROOT / "logs"

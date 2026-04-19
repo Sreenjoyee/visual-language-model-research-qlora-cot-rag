@@ -78,3 +78,47 @@ def build_chat_messages(retrieved_snippets: Sequence[str]) -> list[dict]:
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": build_inference_prompt(retrieved_snippets)},
     ]
+
+
+# ── Stage-2 training targets (TRAINING ONLY — never used at inference) ─────
+# These are the TARGET sequences the model learns to produce.
+# The INPUT prompt is always build_inference_prompt() — identical to inference.
+# Deliberately generic so the model learns format + classification, not
+# memorised phrasing. SRS §12: prompt structure is identical to inference.
+
+_CLASSIFICATION_TARGETS: dict[str, str] = {
+    "NORMAL": (
+        "DIAGNOSIS: NORMAL\n"
+        "EVIDENCE_USED: 1\n"
+        "REASONING:\n"
+        "1. Visual observations: The chest radiograph shows clear lung fields bilaterally "
+        "with no focal consolidation, effusion, or pneumothorax.\n"
+        "2. Clinical interpretation: No acute cardiopulmonary abnormality identified.\n"
+        "3. Evidence support: Retrieved clinical evidence supports a normal chest appearance.\n"
+        "4. Justification: Findings are consistent with a normal chest radiograph.\n"
+    ),
+    "ABNORMAL": (
+        "DIAGNOSIS: ABNORMAL\n"
+        "EVIDENCE_USED: 1\n"
+        "REASONING:\n"
+        "1. Visual observations: The chest radiograph demonstrates pathological findings "
+        "including abnormal opacity, effusion, or structural change.\n"
+        "2. Clinical interpretation: Acute or significant cardiopulmonary abnormality is present.\n"
+        "3. Evidence support: Retrieved clinical evidence is consistent with an abnormal presentation.\n"
+        "4. Justification: Findings are consistent with an abnormal chest radiograph.\n"
+    ),
+}
+
+
+def build_classification_target(label: str) -> str:
+    """Return the training target string for a given NORMAL/ABNORMAL label.
+
+    TRAINING USE ONLY. Never call this at inference — labels must not appear
+    in inference prompts (SRS §2). The label parameter is intentionally not
+    accepted by any inference-facing function.
+    """
+    if label not in _CLASSIFICATION_TARGETS:
+        raise ValueError(
+            f"Unknown label {label!r}. Expected 'NORMAL' or 'ABNORMAL'."
+        )
+    return _CLASSIFICATION_TARGETS[label]
