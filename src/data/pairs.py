@@ -3,13 +3,9 @@
 SRS §3/§4: streaming only, no image storage, num_workers=0.
 SRS §7 Stage 1: "next-token prediction on MIMIC reports."
 
-Design notes:
-    - We yield PIL images, not tensors. Preprocessing happens in the trainer
-      so it can sit alongside the vision encoder on the right device.
-    - We do NOT cache anything to disk. Each call re-opens the HF stream.
-    - Ambiguous/device-only findings filtering (SRS §4) is a stub for now —
-      placed where it belongs so it's not forgotten, but the real filter
-      requires domain knowledge that's out of scope for this pass.
+For Stage-2 balanced classification training, use balanced_stream.py instead.
+This module is Stage-1 only: yields (image, report) without labels, applying
+the full SRS §4 filter stack (filters.py) to skip device-only and ambiguous.
 """
 from __future__ import annotations
 
@@ -19,6 +15,7 @@ from typing import Iterator
 from PIL import Image
 
 from ..config import Config
+from .filters import clean_mimic_text, is_usable
 
 
 @dataclass
@@ -29,19 +26,9 @@ class Pair:
 
 
 def _is_usable_report(text: str) -> bool:
-    """Filter for usable report text.
-
-    Minimal criteria for now; the SRS calls for stricter MIMIC cleaning
-    (device-only findings, ambiguous cases). Expand this before any real
-    training run.
-    """
-    if not text or len(text.strip()) < 20:
-        return False
-    # Device-only markers — a weak heuristic, not the real §4 cleaner.
-    lower = text.lower()
-    if "no evaluation of the lung" in lower and len(text) < 60:
-        return False
-    return True
+    """Full usability gate using the SRS §4 filter stack (filters.py)."""
+    cleaned = clean_mimic_text(text)
+    return is_usable(cleaned)
 
 
 def stream_mimic_pairs(

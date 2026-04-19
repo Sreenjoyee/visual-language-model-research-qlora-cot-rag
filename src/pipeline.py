@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 import torch
 from PIL import Image
@@ -47,6 +46,7 @@ class MeddiagPipeline:
         self,
         config: Config = CONFIG,
         projector_weights: Path | None = None,
+        lora_adapter_dir: Path | None = None,
     ):
         config.validate()
         self.config = config
@@ -60,6 +60,20 @@ class MeddiagPipeline:
                 f"LLM hidden dim {self.llm.hidden_dim} != config.llm_hidden_dim "
                 f"{config.llm_hidden_dim}. Update config.py."
             )
+
+        # Load LoRA adapter if available (Stage 2 trained weights)
+        if lora_adapter_dir is not None:
+            try:
+                from peft import PeftModel
+                self.llm.model = PeftModel.from_pretrained(
+                    self.llm.model, str(lora_adapter_dir)
+                )
+                self.llm.model = self.llm.model.merge_and_unload()
+                print(f"[pipeline] LoRA adapter merged from {lora_adapter_dir}")
+            except ImportError:
+                raise RuntimeError(
+                    "peft is required to load LoRA adapter. Install with: pip install peft"
+                )
 
         self.projector = PerceiverResampler(
             vision_dim=config.vision_hidden_dim,

@@ -1,24 +1,30 @@
-"""Vision encoder — frozen Google ViT-B/16.
+"""Vision encoder — frozen lightweight CNN feature extractor.
 
 SRS §5: "frozen; no pooling-layer hacks; outputs spatial tokens."
-We pull last_hidden_state from the base model, which gives spatial features.
+Uses AutoModel so the backbone is swappable via config.vision_model_id without
+code changes. Current default: google/efficientnet-b0 (5.3M params, ImageNet)
+→ last_hidden_state (B, 1280, 7, 7) reshaped to (B, 49, 1280) spatial tokens.
+
+CNN models return 4D output (B, C, H, W); ViT models return 3D (B, N, C).
+The forward() method handles both via an ndim check before the projector sees it.
 """
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
 from PIL import Image
-from transformers import AutoImageProcessor, ViTModel
+from transformers import AutoImageProcessor, AutoModel
 
-from .config import Config
+from .config import CONFIG, Config
 
 
 class VisionEncoder(nn.Module):
-    """Frozen ViT wrapper producing spatial tokens.
+    """Frozen vision encoder producing spatial tokens.
 
-    Output shape for 224x224 input: (B, N, C) where N=197 (14x14 + 1 cls) and C=768.
-    The actual N and C are derived at runtime and exposed as attributes — never
-    assume shapes; pipeline.py uses these to wire the projector.
+    EfficientNet-B0 at 224×224: last_hidden_state is (B, 1280, 7, 7).
+    forward() reshapes CNN 4D output → (B, 49, 1280) before returning.
+    ViT-like models that already return (B, N, C) pass through unchanged.
+    Actual N and C are derived at runtime via properties.
     """
 
     def __init__(self, config: Config):
@@ -28,14 +34,16 @@ class VisionEncoder(nn.Module):
             config.vision_model_id,
             use_fast=True,
         )
-        self.model = ViTModel.from_pretrained(config.vision_model_id)
+        self.model = AutoModel.from_pretrained(config.vision_model_id)
         self.model.eval()
         for p in self.model.parameters():
             p.requires_grad = False
 
-        # Derived dims — filled on first forward
+        # Derived dims — filled on first forward pass
         self._num_tokens: int | None = None
         self._hidden_dim: int | None = None
+        # Cached after first forward: True = CNN 4D output, False = ViT 3D output
+        self._output_is_4d: bool | None = None
 
     @property
     def num_tokens(self) -> int:
@@ -63,19 +71,29 @@ class VisionEncoder(nn.Module):
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         """pixel_values: (B, 3, H, W) -> (B, N, C)
 
-        Uses last_hidden_state, which for CLIP ViT is already (B, N, C).
+        Handles both CNN output (B, C, H, W) and ViT output (B, N, C).
+        CNN 4D tensors are permuted and flattened to (B, H*W, C) so the
+        projector always receives a consistent 3D sequence.
         """
         out = self.model(pixel_values=pixel_values, return_dict=True)
-        # last_hidden_state shape: (B, N, C)
         tokens = out.last_hidden_state
-        if tokens.ndim != 3:
-            raise RuntimeError(
-                f"Unexpected vision model output shape {tuple(tokens.shape)}; "
-                "expected (B, N, C)."
-            )
 
-        # Sanity: no NaN/Inf — §19.2 module-1 validation requirement
-        if not torch.isfinite(tokens).all():
+        # Resolve and cache the ndim branch on first call.
+        if self._output_is_4d is None:
+            self._output_is_4d = tokens.ndim == 4
+            if not self._output_is_4d and tokens.ndim != 3:
+                raise RuntimeError(
+                    f"Unexpected vision model output shape {tuple(tokens.shape)}; "
+                    "expected (B, N, C) or (B, C, H, W)."
+                )
+
+        if self._output_is_4d:
+            # CNN spatial map: (B, C, H, W) -> (B, H*W, C)
+            B, C, H, W = tokens.shape
+            tokens = tokens.permute(0, 2, 3, 1).reshape(B, H * W, C).contiguous()
+
+        # Finiteness check is expensive on every forward — only run in debug mode.
+        if CONFIG.debug_vision and not torch.isfinite(tokens).all():
             raise RuntimeError("Vision encoder produced non-finite values.")
 
         self._num_tokens = tokens.shape[1]

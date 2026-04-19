@@ -36,14 +36,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import torch
-import torch.nn as nn
 from torch.optim import AdamW
 
 from src.config import CONFIG, Config
 from src.data.pairs import Pair, stream_mimic_pairs
 from src.llm import LoadedLLM, load_llm
 from src.projector import PerceiverResampler
-from src.prompts import IMAGE_PLACEHOLDER, build_chat_messages
+from src.prompts import IMAGE_PLACEHOLDER
 from src.vision import VisionEncoder
 
 
