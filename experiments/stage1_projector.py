@@ -37,6 +37,7 @@ from pathlib import Path
 
 import torch
 from torch.optim import AdamW
+from transformers import get_cosine_schedule_with_warmup
 
 from src.config import CONFIG, Config
 from src.data.pairs import Pair, stream_mimic_pairs
@@ -178,6 +179,25 @@ def _encode_example(
 # -----------------------------------------------------------------------------
 
 
+def _save_checkpoint(
+    path: Path,
+    projector: PerceiverResampler,
+    optimizer: AdamW,
+    scheduler,
+    step: int,
+    epoch: int,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({
+        "step": step,
+        "epoch": epoch,
+        "projector": projector.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict(),
+    }, path)
+    print(f"[stage1] Checkpoint saved → {path}  (step {step})")
+
+
 def train(
     config: Config,
     max_pairs: int,
@@ -185,6 +205,10 @@ def train(
     lr: float,
     log_every: int,
     save_path: Path,
+    warmup_steps: int = 100,
+    save_every: int = 500,
+    resume_from: Path | None = None,
+    grad_accum_steps: int = 1,
 ) -> None:
     config.validate()
 
@@ -193,7 +217,6 @@ def train(
     print("[stage1] Loading LLM (4-bit)...")
     llm = load_llm(config)
 
-    # Sanity: LLM dim matches config
     if llm.hidden_dim != config.llm_hidden_dim:
         raise RuntimeError(
             f"LLM hidden_dim {llm.hidden_dim} != config {config.llm_hidden_dim}"
@@ -211,36 +234,55 @@ def train(
     projector.to(llm.device)
     projector.train()
 
-    # Freeze everything else — explicitly, so we don't rely on inherited state.
     for p in vision.parameters():
         p.requires_grad = False
     for p in llm.model.parameters():
         p.requires_grad = False
 
     trainable = [p for p in projector.parameters() if p.requires_grad]
-    trainable_count = sum(p.numel() for p in trainable)
-    print(f"[stage1] Trainable params (projector only): {trainable_count:,}")
+    print(f"[stage1] Trainable params: {sum(p.numel() for p in trainable):,}")
 
     optimizer = AdamW(trainable, lr=lr, weight_decay=0.01)
 
-    # Stage-1 prefix is fixed — compute once per run.
+    total_steps = epochs * max_pairs // max(grad_accum_steps, 1)
+    scheduler = get_cosine_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=warmup_steps,
+        num_training_steps=total_steps,
+    )
+
+    # ── Resume from checkpoint ────────────────────────────────────────────────
+    global_step = 0
+    start_epoch = 0
+    if resume_from is not None and resume_from.exists():
+        ckpt = torch.load(resume_from, map_location="cpu")
+        projector.load_state_dict(ckpt["projector"])
+        optimizer.load_state_dict(ckpt["optimizer"])
+        scheduler.load_state_dict(ckpt["scheduler"])
+        global_step = ckpt["step"]
+        start_epoch = ckpt["epoch"]
+        print(f"[stage1] Resumed from {resume_from}  (step={global_step}, epoch={start_epoch})")
+
     prefix_text, _ = _build_stage1_prompt(llm.tokenizer)
 
     log_path = config.logs_dir / "stage1.jsonl"
-    log_f = open(log_path, "w", encoding="utf-8")
+    log_mode = "a" if resume_from is not None else "w"
+    log_f = open(log_path, log_mode, encoding="utf-8")
 
-    global_step = 0
     t_start = time.time()
     first_step_grad_checked = False
+    accum_loss = 0.0          # for logging averaged grad-accum loss
+    micro_step = 0            # counts individual forward passes within an accum window
 
-    for epoch in range(epochs):
+    for epoch in range(start_epoch, epochs):
         print(f"[stage1] === Epoch {epoch + 1}/{epochs} ===")
+        optimizer.zero_grad(set_to_none=True)
         pairs_iter = stream_mimic_pairs(config, split="train", max_pairs=max_pairs)
+
         for pair in pairs_iter:
-            optimizer.zero_grad(set_to_none=True)
             try:
                 batch = _encode_example(pair, vision, projector, llm, prefix_text)
-            except Exception as e:  # noqa: BLE001 — a bad sample should not kill training
+            except Exception as e:
                 print(f"[stage1] skip sample: {type(e).__name__}: {e}")
                 continue
 
@@ -254,15 +296,21 @@ def train(
                 print(f"[stage1] step {global_step}: non-finite loss, skipping")
                 continue
 
-            loss.backward()
+            # Scale loss for gradient accumulation
+            scaled_loss = loss / grad_accum_steps
+            scaled_loss.backward()
+            accum_loss += loss.item()
+            micro_step += 1
 
-            # First-step gradient flow check — if projector grad is all zero the
-            # training is silently broken. SRS §19.2 module-2 validation.
+            if micro_step % grad_accum_steps != 0:
+                continue   # accumulate more gradients before a parameter update
+
+            # ── Parameter update ──────────────────────────────────────────────
             if not first_step_grad_checked:
-                total_g = 0.0
-                for p in trainable:
-                    if p.grad is not None:
-                        total_g += p.grad.detach().abs().sum().item()
+                total_g = sum(
+                    p.grad.detach().abs().sum().item()
+                    for p in trainable if p.grad is not None
+                )
                 if total_g == 0.0:
                     raise RuntimeError(
                         "Projector received zero gradient on step 1 — training is a no-op."
@@ -272,47 +320,63 @@ def train(
 
             torch.nn.utils.clip_grad_norm_(trainable, max_norm=1.0)
             optimizer.step()
+            scheduler.step()
+            optimizer.zero_grad(set_to_none=True)
 
+            avg_loss = accum_loss / grad_accum_steps
+            accum_loss = 0.0
             global_step += 1
+
             if global_step % log_every == 0:
                 vram_gb = (
-                    torch.cuda.memory_allocated(llm.device) / (1024**3)
+                    torch.cuda.memory_allocated(llm.device) / (1024 ** 3)
                     if llm.device.type == "cuda" else 0.0
                 )
-                elapsed = time.time() - t_start
+                current_lr = scheduler.get_last_lr()[0]
                 row = {
-                    "step": global_step,
-                    "epoch": epoch,
-                    "loss": float(loss.item()),
+                    "step": global_step, "epoch": epoch,
+                    "loss": round(avg_loss, 4),
+                    "lr": round(current_lr, 8),
                     "vram_gb": round(vram_gb, 2),
-                    "elapsed_s": round(elapsed, 1),
+                    "elapsed_s": round(time.time() - t_start, 1),
                 }
                 print(
                     f"[stage1] step {global_step:5d} | loss {row['loss']:.4f} "
-                    f"| vram {row['vram_gb']:.2f}GB"
+                    f"| lr {current_lr:.2e} | vram {row['vram_gb']:.2f}GB"
                 )
                 log_f.write(json.dumps(row) + "\n")
                 log_f.flush()
 
+            # ── Mid-training checkpoint ───────────────────────────────────────
+            if save_every > 0 and global_step % save_every == 0:
+                ckpt_path = save_path.parent / f"projector_step{global_step}.pt"
+                _save_checkpoint(ckpt_path, projector, optimizer, scheduler, global_step, epoch)
+
     log_f.close()
 
-    # Save projector only. Per SRS §15: checkpoint separation for LoRA vs projector.
+    # Final save — projector weights only (SRS §15: checkpoint separation)
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(projector.state_dict(), save_path)
-    print(f"[stage1] Saved projector to {save_path}")
+    print(f"[stage1] Final projector saved → {save_path}")
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--max-pairs", type=int, default=5000)
+    ap = argparse.ArgumentParser(description="Stage 1: projector alignment training")
+    ap.add_argument("--max-pairs", type=int, default=5000,
+                    help="Training pairs per epoch.")
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--log-every", type=int, default=25)
-    ap.add_argument(
-        "--save-path",
-        type=Path,
-        default=CONFIG.models_dir / "projector_stage1.pt",
-    )
+    ap.add_argument("--warmup-steps", type=int, default=100,
+                    help="Linear warmup steps before cosine decay.")
+    ap.add_argument("--save-every", type=int, default=500,
+                    help="Save a mid-training checkpoint every N optimizer steps (0 = off).")
+    ap.add_argument("--resume-from", type=Path, default=None,
+                    help="Path to a mid-training checkpoint to resume from.")
+    ap.add_argument("--grad-accum-steps", type=int, default=1,
+                    help="Gradient accumulation steps (effective batch size multiplier).")
+    ap.add_argument("--save-path", type=Path,
+                    default=CONFIG.models_dir / "projector_stage1.pt")
     args = ap.parse_args()
 
     try:
@@ -323,6 +387,10 @@ def main() -> int:
             lr=args.lr,
             log_every=args.log_every,
             save_path=args.save_path,
+            warmup_steps=args.warmup_steps,
+            save_every=args.save_every,
+            resume_from=args.resume_from,
+            grad_accum_steps=args.grad_accum_steps,
         )
     except KeyboardInterrupt:
         print("\n[stage1] Interrupted by user.")

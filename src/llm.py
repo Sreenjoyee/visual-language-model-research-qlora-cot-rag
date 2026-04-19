@@ -58,22 +58,38 @@ def load_llm(config: Config) -> LoadedLLM:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_use_double_quant=True,
-    )
+    cuda_available = torch.cuda.is_available()
+
+    if cuda_available:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+        )
+    else:
+        bnb_config = None
+        print("[load_llm] No CUDA GPU detected — loading in float32 on CPU (slow but functional).")
+
+    _CPU_FALLBACK_TRIGGERS = ("CUDA", "no kernel image", "accelerator device", "available devices are []")
 
     try:
-        model = AutoModelForCausalLM.from_pretrained(
-            config.llm_model_id,
-            token=config.hf_token,
-            quantization_config=bnb_config,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-            max_memory=_build_max_memory(config),
-        )
+        if cuda_available:
+            model = AutoModelForCausalLM.from_pretrained(
+                config.llm_model_id,
+                token=config.hf_token,
+                quantization_config=bnb_config,
+                dtype=torch.bfloat16,
+                device_map="auto",
+                max_memory=_build_max_memory(config),
+            )
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                config.llm_model_id,
+                token=config.hf_token,
+                dtype=torch.float32,
+                device_map="cpu",
+            )
         model.eval()
 
         # Verify no layers silently ended up on CPU.
@@ -86,15 +102,15 @@ def load_llm(config: Config) -> LoadedLLM:
                         f"Current budget: {config.max_vram_gb} GiB."
                     )
     except RuntimeError as e:
-        if "CUDA" in str(e) or "no kernel image" in str(e):
+        if any(trigger in str(e) for trigger in _CPU_FALLBACK_TRIGGERS):
             print(
-                f"[load_llm] CUDA error detected: {e}. Falling back to CPU loading "
-                "without 4-bit quantization."
+                f"[load_llm] GPU error: {e}\n"
+                "Falling back to CPU (float32, no quantization)."
             )
             model = AutoModelForCausalLM.from_pretrained(
                 config.llm_model_id,
                 token=config.hf_token,
-                torch_dtype=torch.float32,
+                dtype=torch.float32,
                 device_map="cpu",
             )
             model.eval()
