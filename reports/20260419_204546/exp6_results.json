@@ -1,0 +1,6 @@
+{
+  "experiment": 6,
+  "dataset": "MIMIC-CXR",
+  "n_samples": 4,
+  "ece": 0.4641
+}

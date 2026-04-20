@@ -352,7 +352,20 @@ def train(
                 ckpt_path = save_path.parent / f"projector_step{global_step}.pt"
                 _save_checkpoint(ckpt_path, projector, optimizer, scheduler, global_step, epoch)
 
+    # Write final log row even if global_step never hit log_every (short runs)
+    if global_step > 0:
+        row = {
+            "step": global_step, "epoch": epochs - 1,
+            "loss": round(accum_loss / max(micro_step % grad_accum_steps or grad_accum_steps, 1), 4),
+            "lr": round(scheduler.get_last_lr()[0], 8),
+            "vram_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
+            "elapsed_s": round(time.time() - t_start, 1),
+        }
+        log_f.write(json.dumps(row) + "\n")
     log_f.close()
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     # Final save — projector weights only (SRS §15: checkpoint separation)
     save_path.parent.mkdir(parents=True, exist_ok=True)
