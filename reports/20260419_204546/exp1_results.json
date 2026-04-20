@@ -1,0 +1,35 @@
+{
+  "experiment": 1,
+  "dataset": "NIH ChestX-ray14",
+  "n_samples": 4,
+  "metrics": {
+    "auroc": 0.5,
+    "accuracy": 0.75,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "support_pos": 0,
+    "support_neg": 4
+  },
+  "latency": {
+    "mean_s": 31.689,
+    "p50_s": 36.387,
+    "p95_s": 38.336,
+    "p99_s": 38.336
+  },
+  "peak_vram_gb": 0.284,
+  "literature": {
+    "QLoRA 8-bit": {
+      "auroc": 0.782,
+      "f1": 0.694
+    },
+    "LLaVA-Med": {
+      "auroc": 0.831,
+      "f1": 0.741
+    },
+    "DenseNet-121": {
+      "auroc": 0.841,
+      "f1": 0.756
+    }
+  }
+}

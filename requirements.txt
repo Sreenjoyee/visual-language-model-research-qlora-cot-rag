@@ -30,7 +30,7 @@ faiss-cpu==1.13.2
 fastjsonschema==2.21.2
 filelock==3.28.0
 fqdn==1.5.1
-fsspec==2026.3.0
+fsspec==2026.2.0
 git-filter-repo==2.47.0
 h11==0.16.0
 hf-xet==1.4.3

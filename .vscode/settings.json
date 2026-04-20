@@ -2,5 +2,16 @@
   "python.defaultInterpreterPath": "C:\\Users\\sujal\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
   "python.analysis.extraPaths": [
     "${workspaceFolder}"
+  ],
+  "cSpell.words": [
+    "ACCUM", "accum", "FAISS", "faiss", "iuxray", "isdir",
+    "MEDDIAG", "meddiag", "pubmed", "pytest", "jsonl",
+    "bitsandbytes", "bnb", "lora", "LoRA", "peft",
+    "vram", "VRAM", "bf16", "nf4", "safetensors",
+    "tokenizer", "tokenizers", "dataclass", "dataclasses",
+    "wandb", "warmup", "minilm", "MiniLM", "bertscore",
+    "BERTScore", "auroc", "AUROC", "mimic", "MIMIC",
+    "llama", "LLaMA", "projector", "perceiver",
+    "nohup", "SIGINT", "SIGTERM", "powercfg", "reentrant", "kbit"
   ]
 }

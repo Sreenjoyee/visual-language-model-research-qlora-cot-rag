@@ -184,9 +184,11 @@ class MeddiagPipeline:
             max_new_tokens=self.config.max_new_tokens,
             do_sample=self.config.do_sample,
             pad_token_id=self.llm.tokenizer.pad_token_id,
+            temperature=self.config.temperature if self.config.do_sample else None,
+            top_p=None,
         )
-        if self.config.do_sample:
-            gen_kwargs["temperature"] = self.config.temperature
+        # Remove None-valued keys — transformers warns if invalid flags are passed
+        gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
 
         output_ids = self.llm.model.generate(**gen_kwargs)
         # When only inputs_embeds is passed, HF returns only the NEW tokens — no

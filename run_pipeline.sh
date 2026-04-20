@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 # =============================================================================
 # MEDDIAG — End-to-End Pipeline Runner
-# Usage:  bash run_pipeline.sh [--smoke] [--stage1-only] [--skip-train]
+# Usage:  bash run_pipeline.sh [--smoke] [--stage1-only] [--skip-train] [--bg]
 #
-#   --smoke        Fast sanity run (100 pairs, 50 eval samples)
+#   --smoke        Fast sanity run (2 pairs, 4 eval samples)
 #   --stage1-only  Stop after Stage 1; skip LoRA fine-tuning
 #   --skip-train   Skip both training stages (use existing checkpoints)
+#   --bg           Run in background; output tailed to logs/run.log
 # =============================================================================
 set -euo pipefail
 
 # ── Token setup ───────────────────────────────────────────────────────────────
-# Reads HF_TOKEN from .env if present, otherwise falls back to the env.
-# Never commit your token — .env is in .gitignore.
 if [[ -f ".env" ]]; then
     export $(grep -v '^#' .env | xargs)
 fi
@@ -27,29 +26,60 @@ fi
 SMOKE=0
 STAGE1_ONLY=0
 SKIP_TRAIN=0
+BG=0
 
 for arg in "$@"; do
     case $arg in
         --smoke)       SMOKE=1 ;;
         --stage1-only) STAGE1_ONLY=1 ;;
         --skip-train)  SKIP_TRAIN=1 ;;
+        --bg)          BG=1 ;;
         *)
             echo "[ERROR] Unknown argument: $arg"
-            echo "  Usage: bash run_pipeline.sh [--smoke] [--stage1-only] [--skip-train]"
+            echo "  Usage: bash run_pipeline.sh [--smoke] [--stage1-only] [--skip-train] [--bg]"
             exit 1 ;;
     esac
 done
 
+# ── Background mode ───────────────────────────────────────────────────────────
+# Re-launch self without --bg, piping output to logs/run.log.
+# The original shell returns immediately; training continues detached.
+if [[ $BG -eq 1 ]]; then
+    mkdir -p logs
+    ARGS_WITHOUT_BG="${@/--bg/}"
+    nohup bash "$0" $ARGS_WITHOUT_BG >> logs/run.log 2>&1 &
+    BG_PID=$!
+    disown $BG_PID  # detach from shell job table so SIGHUP is not forwarded on exit
+    echo "[bg] PID $BG_PID — tailing logs/run.log  (Ctrl+C to stop tailing; process keeps running)"
+    tail -f logs/run.log
+    exit 0
+fi
+
+# ── Sleep prevention (Windows) ───────────────────────────────────────────────
+# Prevent the PC from sleeping or hibernating while training runs.
+# Restored automatically on exit, Ctrl+C, or crash via trap.
+_restore_power() {
+    powercfg /change standby-timeout-ac 30   2>/dev/null || true
+    powercfg /change hibernate-timeout-ac 60 2>/dev/null || true
+    echo "[power] Sleep settings restored."
+}
+trap _restore_power EXIT INT TERM
+powercfg /change standby-timeout-ac 0   2>/dev/null && \
+powercfg /change hibernate-timeout-ac 0 2>/dev/null && \
+echo "[power] Sleep disabled for duration of run." || \
+echo "[warn]  Could not disable sleep (run as Admin for reliable prevention)."
+
 # ── Config ────────────────────────────────────────────────────────────────────
 if [[ $SMOKE -eq 1 ]]; then
-    MAX_PAIRS_S1=100
-    MAX_PAIRS_S2=100
-    WARMUP_S1=10
-    WARMUP_S2=10
-    SAVE_EVERY=50
-    EVAL_SAMPLES=50
-    ROBUSTNESS_SAMPLES=20
-    echo "[info] SMOKE mode — tiny run for end-to-end verification"
+    # 2 pairs: enough to confirm forward+backward runs, not enough to hang on CPU.
+    MAX_PAIRS_S1=2
+    MAX_PAIRS_S2=2
+    WARMUP_S1=1
+    WARMUP_S2=1
+    SAVE_EVERY=0
+    EVAL_SAMPLES=4
+    ROBUSTNESS_SAMPLES=2
+    echo "[info] SMOKE mode — minimal 2-pair run for pipeline verification (CPU-safe)"
 else
     MAX_PAIRS_S1=5000
     MAX_PAIRS_S2=2000
@@ -59,6 +89,9 @@ else
     EVAL_SAMPLES=200
     ROBUSTNESS_SAMPLES=50
 fi
+
+# RTX 3050 4GB: grad_accum_steps=8 keeps per-step activation memory low
+GRAD_ACCUM=8
 
 PROJECTOR_PATH="models/projector_stage1.pt"
 LORA_DIR="models/lora_adapter"
@@ -80,13 +113,18 @@ echo "[ok] All fast tests pass"
 
 # ── 1. FAISS index ────────────────────────────────────────────────────────────
 step "1 / 7  Building FAISS retrieval index"
-if [[ -f "data/faiss_index/index.faiss" ]]; then
-    echo "[skip] FAISS index already exists at data/faiss_index/index.faiss"
-elif [[ $SMOKE -eq 1 ]]; then
-    # Smoke: guidelines-only index (no MIMIC streaming, builds in ~5s)
-    python -m scripts.build_faiss_index --skip-mimic --max-pubmed 20 --max-iuxray 50
-    echo "[ok] FAISS index built (smoke — guidelines + small PubMed/IU-Xray)"
+FAISS_INDEX_PATH="${MEDDIAG_FAISS_INDEX_DIR:-faiss_index}/index.faiss"
+FAISS_META_PATH="${MEDDIAG_FAISS_INDEX_DIR:-faiss_index}/metadata.jsonl"
+if [[ $SMOKE -eq 1 ]]; then
+    # Smoke: small index, skip if already built from a prior smoke run
+    if [[ -f "$FAISS_INDEX_PATH" ]]; then
+        echo "[skip] Smoke FAISS index already exists at $FAISS_INDEX_PATH"
+    else
+        python -m scripts.build_faiss_index --skip-mimic --max-pubmed 20 --max-iuxray 50
+        echo "[ok] FAISS index built (smoke — guidelines + small PubMed/IU-Xray)"
+    fi
 else
+    # Full run: always rebuild so a stale smoke index is never used for eval
     python -m scripts.build_faiss_index --max-mimic 20000 --max-pubmed 300 --max-iuxray 2000
     echo "[ok] FAISS index built"
 fi
@@ -99,15 +137,24 @@ if [[ $SKIP_TRAIN -eq 1 ]]; then
 elif [[ -f "$PROJECTOR_PATH" ]]; then
     echo "[skip] Projector already exists at $PROJECTOR_PATH"
 else
+    # Auto-resume from latest mid-training checkpoint if one exists
+    RESUME_S1=""
+    LATEST_S1_CKPT=$(ls -t models/projector_step*.pt 2>/dev/null | head -1 || true)
+    if [[ -n "$LATEST_S1_CKPT" ]]; then
+        echo "[resume] Stage 1 checkpoint found: $LATEST_S1_CKPT"
+        RESUME_S1="--resume-from $LATEST_S1_CKPT"
+    fi
+
     python -m experiments.stage1_projector \
-        --max-pairs    "$MAX_PAIRS_S1" \
-        --epochs       1 \
-        --lr           1e-4 \
-        --warmup-steps "$WARMUP_S1" \
-        --grad-accum-steps 4 \
-        --save-every   "$SAVE_EVERY" \
-        --log-every    25 \
-        --save-path    "$PROJECTOR_PATH"
+        --max-pairs        "$MAX_PAIRS_S1" \
+        --epochs           1 \
+        --lr               1e-4 \
+        --warmup-steps     "$WARMUP_S1" \
+        --grad-accum-steps "$GRAD_ACCUM" \
+        --save-every       "$SAVE_EVERY" \
+        --log-every        25 \
+        --save-path        "$PROJECTOR_PATH" \
+        $RESUME_S1
     echo "[ok] Stage 1 done → $PROJECTOR_PATH"
 fi
 
@@ -119,16 +166,25 @@ if [[ $SKIP_TRAIN -eq 1 || $STAGE1_ONLY -eq 1 ]]; then
 elif [[ -d "$LORA_DIR" ]]; then
     echo "[skip] LoRA adapter already exists at $LORA_DIR"
 else
+    # Auto-resume from latest mid-training LoRA checkpoint if one exists
+    RESUME_S2=""
+    LATEST_S2_CKPT=$(ls -dt models/lora_step* 2>/dev/null | head -1 || true)
+    if [[ -n "$LATEST_S2_CKPT" && -f "$LATEST_S2_CKPT/train_state.pt" ]]; then
+        echo "[resume] Stage 2 checkpoint found: $LATEST_S2_CKPT"
+        RESUME_S2="--resume-from $LATEST_S2_CKPT"
+    fi
+
     python -m experiments.stage2_classification \
         --projector-path   "$PROJECTOR_PATH" \
         --max-pairs        "$MAX_PAIRS_S2" \
         --epochs           2 \
         --lr               2e-4 \
         --warmup-steps     "$WARMUP_S2" \
-        --grad-accum-steps 4 \
+        --grad-accum-steps "$GRAD_ACCUM" \
         --save-every       "$SAVE_EVERY" \
         --log-every        25 \
-        --lora-save-dir    "$LORA_DIR"
+        --lora-save-dir    "$LORA_DIR" \
+        $RESUME_S2
     echo "[ok] Stage 2 done → $LORA_DIR"
 fi
 
@@ -187,15 +243,18 @@ echo "[ok] Plots saved → $DIAG_DIR/"
 # ── 7. Sanity inference ───────────────────────────────────────────────────────
 step "7 / 7  Sanity inference on sample_xray.jpg"
 if [[ -f "sample_xray.jpg" ]]; then
-    python - <<EOF
-from src.pipeline import MedDiagPipeline
+    MEDDIAG_PROJECTOR="$PROJECTOR_PATH" MEDDIAG_LORA="$LORA_DIR" python - <<'EOF'
+import os
+from src.pipeline import MeddiagPipeline
 from src.config import CONFIG
 from PIL import Image
 
-pipe = MedDiagPipeline(
+projector_path = os.environ["MEDDIAG_PROJECTOR"]
+lora_dir = os.environ["MEDDIAG_LORA"]
+pipe = MeddiagPipeline(
     config=CONFIG,
-    projector_path="$PROJECTOR_PATH",
-    lora_adapter_dir="$LORA_DIR" if __import__('os').path.isdir("$LORA_DIR") else None,
+    projector_path=projector_path,
+    lora_adapter_dir=lora_dir if os.path.isdir(lora_dir) else None,
 )
 img = Image.open("sample_xray.jpg").convert("RGB")
 result = pipe(img)

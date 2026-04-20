@@ -92,8 +92,8 @@ def load_llm(config: Config) -> LoadedLLM:
             )
         model.eval()
 
-        # Verify no layers silently ended up on CPU.
-        if config.device.startswith("cuda"):
+        # Verify no layers silently ended up on CPU (only meaningful with a real GPU).
+        if cuda_available:
             for name, param in model.named_parameters():
                 if param.device.type == "cpu":
                     raise RuntimeError(

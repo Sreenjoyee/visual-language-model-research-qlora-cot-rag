@@ -33,7 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.config import CONFIG, Config
@@ -133,7 +133,7 @@ def _compile_report(
     )
 
     report: dict = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
         "n_samples": n,
         "metrics": {
             **clf,
@@ -270,7 +270,7 @@ def main() -> int:
 
     CONFIG.validate(require_token=True)
 
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     out_file: Path = args.out_file or (CONFIG.logs_dir / f"eval_report_{ts}.json")
 
     print("[eval] Loading pipeline...")
