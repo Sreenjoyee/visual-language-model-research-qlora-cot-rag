@@ -1,0 +1,13 @@
+{
+  "experiment": 3,
+  "meddiag_rag_bertscore": 0.7407,
+  "meddiag_no_rag_bertscore": 0.7632,
+  "literature": {
+    "LLaVA-Rad 7B": {
+      "bertscore_f1": 0.762
+    },
+    "GPT-4V": {
+      "bertscore_f1": 0.778
+    }
+  }
+}

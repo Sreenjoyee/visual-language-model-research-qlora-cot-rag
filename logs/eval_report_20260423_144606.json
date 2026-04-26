@@ -1,0 +1,2849 @@
+{
+  "timestamp": "2026-04-23T18:57:00.581059+00:00Z",
+  "n_samples": 200,
+  "metrics": {
+    "accuracy": 0.685,
+    "precision": 0.6637,
+    "recall": 0.75,
+    "f1": 0.7042,
+    "support_pos": 100,
+    "support_neg": 100,
+    "auroc": 0.6787,
+    "ece": 0.2553,
+    "evidence_citation_rate": 1.0,
+    "reasoning_completeness": 0.995,
+    "evidence_alignment_rate": 1.0,
+    "unparseable_rate": 0.0
+  },
+  "latency": {
+    "mean_s": 25.687,
+    "p50_s": 24.852,
+    "p95_s": 39.367,
+    "p99_s": 55.308
+  },
+  "vram": {
+    "peak_gb": 0.261,
+    "mean_gb": 0.177
+  },
+  "green_judge": {
+    "G_groundedness": 1.0,
+    "R_reasoning": 0.995,
+    "E_alignment": 1.0,
+    "E_error_free": 1.0,
+    "N_numerical": 0.6915,
+    "composite": 0.9373
+  },
+  "rag_ablation": {
+    "with_rag_auroc": 0.6787,
+    "without_rag_auroc": 0.6319,
+    "delta": 0.0468
+  },
+  "robustness": {
+    "brightness_0.5_auroc": 0.6376,
+    "brightness_2.0_auroc": 0.744,
+    "contrast_0.5_auroc": 0.6976,
+    "contrast_2.0_auroc": 0.7512
+  },
+  "per_sample": [
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 42.82,
+      "vram_peak_gb": 0.249,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9995,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 33.304,
+      "vram_peak_gb": 0.165,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0276,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 19.973,
+      "vram_peak_gb": 0.135,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.8176,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 34.575,
+      "vram_peak_gb": 0.189,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0421,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 21.778,
+      "vram_peak_gb": 0.126,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.0474,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 34.864,
+      "vram_peak_gb": 0.193,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7982,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 25.546,
+      "vram_peak_gb": 0.18,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.026,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 22.534,
+      "vram_peak_gb": 0.149,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7058,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 30.802,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0503,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 17.142,
+      "vram_peak_gb": 0.147,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0276,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 13.417,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7311,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 30.304,
+      "vram_peak_gb": 0.194,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9724,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 36.138,
+      "vram_peak_gb": 0.248,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9998,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 37.132,
+      "vram_peak_gb": 0.236,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7311,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 26.685,
+      "vram_peak_gb": 0.193,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9993,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 24.873,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 32.226,
+      "vram_peak_gb": 0.232,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9998,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 27.266,
+      "vram_peak_gb": 0.194,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0474,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 16.218,
+      "vram_peak_gb": 0.126,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9995,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 35.023,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0421,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 20.529,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 20.738,
+      "vram_peak_gb": 0.147,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 1.0,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 26.565,
+      "vram_peak_gb": 0.179,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9998,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 34.785,
+      "vram_peak_gb": 0.244,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0331,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 18.617,
+      "vram_peak_gb": 0.149,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.3775,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 24.705,
+      "vram_peak_gb": 0.181,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0311,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 17.873,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 25.544,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 22.105,
+      "vram_peak_gb": 0.147,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7311,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 35.511,
+      "vram_peak_gb": 0.239,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9993,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 35.371,
+      "vram_peak_gb": 0.194,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.5,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 34.722,
+      "vram_peak_gb": 0.175,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0396,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 25.267,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 1.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 24.336,
+      "vram_peak_gb": 0.174,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 21.706,
+      "vram_peak_gb": 0.178,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.0474,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 24.072,
+      "vram_peak_gb": 0.193,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.026,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 14.763,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 1.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 19.057,
+      "vram_peak_gb": 0.177,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7311,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 14.653,
+      "vram_peak_gb": 0.151,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0276,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 13.049,
+      "vram_peak_gb": 0.147,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 22.044,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7058,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 16.752,
+      "vram_peak_gb": 0.178,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0503,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 12.423,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.0396,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 18.029,
+      "vram_peak_gb": 0.193,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9994,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 23.762,
+      "vram_peak_gb": 0.235,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7982,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 26.254,
+      "vram_peak_gb": 0.232,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 11.564,
+      "vram_peak_gb": 0.139,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0276,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 14.782,
+      "vram_peak_gb": 0.149,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 24.95,
+      "vram_peak_gb": 0.248,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7311,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 19.36,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0534,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 13.876,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9991,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 21.047,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0447,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 14.984,
+      "vram_peak_gb": 0.136,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0276,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 18.917,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.0567,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 26.711,
+      "vram_peak_gb": 0.193,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 25.53,
+      "vram_peak_gb": 0.192,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0396,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 18.904,
+      "vram_peak_gb": 0.121,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 26.264,
+      "vram_peak_gb": 0.193,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0373,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 18.357,
+      "vram_peak_gb": 0.153,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0421,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 19.021,
+      "vram_peak_gb": 0.147,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9998,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 35.722,
+      "vram_peak_gb": 0.261,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0421,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 17.987,
+      "vram_peak_gb": 0.139,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 16.209,
+      "vram_peak_gb": 0.129,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7982,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 37.412,
+      "vram_peak_gb": 0.244,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 16.325,
+      "vram_peak_gb": 0.139,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7311,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 26.616,
+      "vram_peak_gb": 0.193,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0311,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 17.27,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.0601,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 25.188,
+      "vram_peak_gb": 0.193,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 23.626,
+      "vram_peak_gb": 0.175,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 26.14,
+      "vram_peak_gb": 0.185,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 21.872,
+      "vram_peak_gb": 0.139,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7311,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 28.663,
+      "vram_peak_gb": 0.162,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 21.292,
+      "vram_peak_gb": 0.139,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 44.92,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0331,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 19.918,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 32.988,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 23.495,
+      "vram_peak_gb": 0.186,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9993,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 33.015,
+      "vram_peak_gb": 0.243,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0421,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 28.427,
+      "vram_peak_gb": 0.154,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9924,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 24.367,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.026,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 14.001,
+      "vram_peak_gb": 0.149,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7311,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 22.948,
+      "vram_peak_gb": 0.173,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 32.314,
+      "vram_peak_gb": 0.151,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.6792,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 34.62,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0447,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 17.026,
+      "vram_peak_gb": 0.133,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 25.312,
+      "vram_peak_gb": 0.192,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7058,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 22.393,
+      "vram_peak_gb": 0.162,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 16.525,
+      "vram_peak_gb": 0.126,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 24.388,
+      "vram_peak_gb": 0.173,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 22.398,
+      "vram_peak_gb": 0.162,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 1.0,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 56.439,
+      "vram_peak_gb": 0.236,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 35.798,
+      "vram_peak_gb": 0.18,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0373,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 25.708,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.8176,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 33.145,
+      "vram_peak_gb": 0.181,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0373,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 27.649,
+      "vram_peak_gb": 0.147,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 23.269,
+      "vram_peak_gb": 0.174,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.0716,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 34.798,
+      "vram_peak_gb": 0.193,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0503,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 24.959,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 26.185,
+      "vram_peak_gb": 0.151,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7982,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 36.058,
+      "vram_peak_gb": 0.181,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 21.196,
+      "vram_peak_gb": 0.147,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 40.628,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0373,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 24.786,
+      "vram_peak_gb": 0.149,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 17.496,
+      "vram_peak_gb": 0.138,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 18.38,
+      "vram_peak_gb": 0.15,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.3486,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 21.376,
+      "vram_peak_gb": 0.167,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0276,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 17.726,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 27.786,
+      "vram_peak_gb": 0.186,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0421,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 19.052,
+      "vram_peak_gb": 0.149,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 31.786,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 14.729,
+      "vram_peak_gb": 0.124,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9999,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 23.737,
+      "vram_peak_gb": 0.173,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 28.899,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.0534,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 25.573,
+      "vram_peak_gb": 0.193,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0311,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 21.643,
+      "vram_peak_gb": 0.149,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7311,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 23.328,
+      "vram_peak_gb": 0.174,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0503,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 16.883,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 27.706,
+      "vram_peak_gb": 0.173,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 15.256,
+      "vram_peak_gb": 0.124,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.8176,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 34.639,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.4378,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 28.921,
+      "vram_peak_gb": 0.214,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7311,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 27.402,
+      "vram_peak_gb": 0.175,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0373,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 17.837,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.8176,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 26.616,
+      "vram_peak_gb": 0.186,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 18.55,
+      "vram_peak_gb": 0.124,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 1.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 32.039,
+      "vram_peak_gb": 0.183,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 28.892,
+      "vram_peak_gb": 0.172,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0331,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 22.585,
+      "vram_peak_gb": 0.149,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 26.493,
+      "vram_peak_gb": 0.175,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 30.627,
+      "vram_peak_gb": 0.178,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0311,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 21.377,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.5,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 34.755,
+      "vram_peak_gb": 0.175,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.0601,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 36.633,
+      "vram_peak_gb": 0.193,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9996,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 39.737,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0276,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 31.018,
+      "vram_peak_gb": 0.149,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 46.274,
+      "vram_peak_gb": 0.244,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9994,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 34.325,
+      "vram_peak_gb": 0.165,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0351,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 28.803,
+      "vram_peak_gb": 0.149,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0244,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 19.092,
+      "vram_peak_gb": 0.122,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 27.724,
+      "vram_peak_gb": 0.147,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 43.891,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9466,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 55.308,
+      "vram_peak_gb": 0.246,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0503,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 28.687,
+      "vram_peak_gb": 0.145,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 27.817,
+      "vram_peak_gb": 0.129,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 25.951,
+      "vram_peak_gb": 0.178,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 38.685,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0474,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 17.86,
+      "vram_peak_gb": 0.139,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9994,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 28.271,
+      "vram_peak_gb": 0.165,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 24.852,
+      "vram_peak_gb": 0.139,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 1.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 27.79,
+      "vram_peak_gb": 0.194,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9996,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 39.367,
+      "vram_peak_gb": 0.234,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.0447,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 36.096,
+      "vram_peak_gb": 0.193,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 28.068,
+      "vram_peak_gb": 0.186,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 34.108,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0331,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 29.286,
+      "vram_peak_gb": 0.139,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 32.153,
+      "vram_peak_gb": 0.183,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0331,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 18.043,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0331,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 17.346,
+      "vram_peak_gb": 0.149,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7311,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 28.529,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0311,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 21.473,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0396,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 22.714,
+      "vram_peak_gb": 0.139,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 38.606,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9998,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 45.868,
+      "vram_peak_gb": 0.237,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0373,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 22.647,
+      "vram_peak_gb": 0.135,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0351,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 15.828,
+      "vram_peak_gb": 0.147,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.3775,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 16.177,
+      "vram_peak_gb": 0.156,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9996,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 24.14,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7982,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 24.661,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0351,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 18.362,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 30.485,
+      "vram_peak_gb": 0.194,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9994,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 24.525,
+      "vram_peak_gb": 0.165,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 34.19,
+      "vram_peak_gb": 0.235,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0447,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 26.823,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0331,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 21.509,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 15.368,
+      "vram_peak_gb": 0.129,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0351,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 21.888,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0373,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 15.712,
+      "vram_peak_gb": 0.126,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.0637,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 37.203,
+      "vram_peak_gb": 0.193,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 30.813,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9993,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 30.501,
+      "vram_peak_gb": 0.235,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0447,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 17.381,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 18.275,
+      "vram_peak_gb": 0.145,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 14.305,
+      "vram_peak_gb": 0.126,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9997,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 25.907,
+      "vram_peak_gb": 0.186,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0351,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 21.221,
+      "vram_peak_gb": 0.146,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7773,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 22.309,
+      "vram_peak_gb": 0.178,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7311,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 27.659,
+      "vram_peak_gb": 0.201,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.9996,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 23.168,
+      "vram_peak_gb": 0.185,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0396,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 13.419,
+      "vram_peak_gb": 0.122,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 20.332,
+      "vram_peak_gb": 0.168,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7982,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 22.111,
+      "vram_peak_gb": 0.176,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 27.787,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0276,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 16.08,
+      "vram_peak_gb": 0.149,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 31.145,
+      "vram_peak_gb": 0.235,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7982,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 22.812,
+      "vram_peak_gb": 0.175,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0311,
+      "correct": false,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 17.306,
+      "vram_peak_gb": 0.122,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0373,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 16.177,
+      "vram_peak_gb": 0.126,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.7549,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 39.216,
+      "vram_peak_gb": 0.228,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "NORMAL",
+      "pred": "NORMAL",
+      "p_abnormal": 0.0,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 24.06,
+      "vram_peak_gb": 0.139,
+      "source": "mimic-cxr"
+    },
+    {
+      "true": "ABNORMAL",
+      "pred": "ABNORMAL",
+      "p_abnormal": 0.0534,
+      "correct": true,
+      "evidence_used": [
+        1,
+        2,
+        3
+      ],
+      "latency_s": 35.246,
+      "vram_peak_gb": 0.193,
+      "source": "mimic-cxr"
+    }
+  ]
+}

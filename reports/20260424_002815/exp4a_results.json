@@ -1,0 +1,8 @@
+{
+  "experiment": "4a",
+  "dataset": "IU-Xray NORMAL",
+  "n_samples": 100,
+  "false_positive_rate": 1.0,
+  "sycophantic_count": 100,
+  "resistance_rate": 0.0
+}

@@ -356,9 +356,9 @@ def train(
     if global_step > 0:
         row = {
             "step": global_step, "epoch": epochs - 1,
-            "loss": round(accum_loss / max(micro_step % grad_accum_steps or grad_accum_steps, 1), 4),
+            "loss": round(accum_loss / (micro_step % grad_accum_steps or grad_accum_steps), 4),
             "lr": round(scheduler.get_last_lr()[0], 8),
-            "vram_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
+            "vram_gb": round(torch.cuda.memory_allocated(llm.device) / (1024 ** 3), 2) if llm.device.type == "cuda" else 0.0,
             "elapsed_s": round(time.time() - t_start, 1),
         }
         log_f.write(json.dumps(row) + "\n")

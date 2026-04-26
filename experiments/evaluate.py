@@ -36,6 +36,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
+
 from src.config import CONFIG, Config
 from src.data.balanced_stream import LabeledPair, balanced_mimic_stream
 from src.eval_runner import ScoredResult, run_eval_stream
@@ -219,6 +221,18 @@ def _print_summary(report: dict) -> None:
             label = k.replace("_auroc", "")
             val = f"{v:.4f}" if v == v else "NaN"  # NaN check
             print(f"    {label:<20}: {val}")
+
+    # Youden J optimal threshold — copy this into src/config.py after each full run
+    samples = report.get("per_sample", [])
+    if len(samples) >= 10:
+        from sklearn.metrics import roc_curve
+        yt = [1 if s["true"] == "ABNORMAL" else 0 for s in samples]
+        yp = [s["p_abnormal"] for s in samples]
+        fpr, tpr, thresholds = roc_curve(yt, yp)
+        j = tpr - fpr
+        best = int(np.argmax(j))
+        print(f"\n  Optimal threshold (Youden J={j[best]:.4f}): {thresholds[best]:.4f}")
+        print(f"  → Update src/config.py classification_threshold to {thresholds[best]:.4f}")
 
     print("=" * 62)
 

@@ -84,6 +84,18 @@ class Config:
     mimic_text_columns: tuple[str, ...] = ("impression", "findings", "report")
     mimic_image_columns: tuple[str, ...] = ("image", "jpg", "dicom")
 
+    # --- Classification threshold ---
+    # Derived via Youden J statistic (J = TPR - FPR, argmax over ROC curve)
+    # on 200-sample MIMIC-CXR eval with image-conditioned retrieval (caption pass).
+    # Optimal J=0.3400 at threshold=0.3486, TPR=0.648, FPR=0.308.
+    # Updated from 0.1824 after fixing p_abn extraction to scan label-token position
+    # rather than first generated token (which was start of CoT reasoning chain).
+    classification_threshold: float = field(
+        default_factory=lambda: float(
+            os.environ.get("MEDDIAG_THRESHOLD", "0.3486")
+        )
+    )
+
     # --- Inference ---
     max_new_tokens: int = 384
     # Greedy by default to make diagnosis reproducible. SRS §17 flags greedy as an

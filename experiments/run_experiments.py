@@ -25,6 +25,7 @@ from datetime import datetime
 from pathlib import Path
 
 import torch
+from tqdm import tqdm
 
 from src.config import CONFIG
 from src.dataset_streams import (
@@ -186,12 +187,12 @@ def exp2_rag_quality(
     ))
     refs, rag_outs, no_rag_outs = [], [], []
 
-    for pair in items:
+    for pair in tqdm(items, desc="  [Exp 2] RAG+NoRAG inference", unit="sample"):
         try:
             d_rag, _ = _diagnose_scored(pipeline, pair.image, no_rag=False)
             d_no,  _ = _diagnose_scored(pipeline, pair.image, no_rag=True)
         except Exception as e:
-            print(f"  sample error: {e}")
+            tqdm.write(f"  sample error: {e}")
             continue
         refs.append(pair.report)
         rag_outs.append(d_rag.raw_output)
@@ -242,7 +243,7 @@ def exp3_bertscore_comparison(
             hf_token=pipeline.config.hf_token, max_samples=max_samples
         ))
         refs, rag_outs, no_rag_outs = [], [], []
-        for pair in items:
+        for pair in tqdm(items, desc="  [Exp 3] BERTScore inference", unit="sample"):
             try:
                 d_rag, _ = _diagnose_scored(pipeline, pair.image, no_rag=False)
                 d_no,  _ = _diagnose_scored(pipeline, pair.image, no_rag=True)
@@ -309,11 +310,12 @@ def exp4a_sycophancy(
 ) -> dict:
     print("\n[Exp 4A] Adversarial Sycophancy Probe — IU-Xray NORMAL")
     fooled, total = 0, 0
-    for pair in iu_xray_normal_stream(max_samples=max_samples):
+    for pair in tqdm(iu_xray_normal_stream(max_samples=max_samples),
+                     total=max_samples, desc="  [Exp 4A] Sycophancy probe", unit="sample"):
         try:
             diagnosis, raw = _run_adversarial(pipeline, pair.image)
         except Exception as e:
-            print(f"  sample error: {e}")
+            tqdm.write(f"  sample error: {e}")
             continue
         fooled += int(is_sycophantic(raw, diagnosis, true_label="NORMAL"))
         total  += 1
@@ -459,11 +461,10 @@ def exp7_rag_ablation(
     k_results: dict[int, dict] = {}
 
     for k in k_values:
-        print(f"  k={k} ...")
         pipeline.config.retrieval_top_k = k
         refs, outputs, latencies = [], [], []
 
-        for pair in items:
+        for pair in tqdm(items, desc=f"  [Exp 7] k={k}", unit="sample"):
             t0 = time.perf_counter()
             try:
                 diag, _ = _diagnose_scored(pipeline, pair.image, no_rag=(k == 0))
@@ -549,6 +550,17 @@ def exp8_energy(
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+# Per-experiment hard caps applied regardless of global --max-samples.
+_EXP_CAPS = {
+    "2": 100, "3": 100,        # ×2 inference — capped at 100
+    "4a": 100,
+    "4b": 100,
+    "5": 100,
+    "6": 100,
+    "7": 30,                   # ×4 inference (k=1,3,5,10)
+    "8": 20,
+}
+
 _ALL_EXPS = ["1", "2", "3", "4a", "4b", "5", "6", "7", "8"]
 
 
@@ -557,6 +569,8 @@ def main() -> None:
     parser.add_argument("--exp", default="all",
                         help="Comma-separated experiment IDs or 'all'. E.g. 1,2,4a")
     parser.add_argument("--output-dir", default="reports", type=Path)
+    parser.add_argument("--resume-dir", default=None, type=Path,
+                        help="Reuse an existing output dir instead of creating a new timestamped one")
     parser.add_argument("--max-samples", type=int, default=50)
     parser.add_argument("--projector", type=Path, default=None,
                         help="Path to projector .pt weights")
@@ -569,8 +583,12 @@ def main() -> None:
     exps = _ALL_EXPS if args.exp.strip() == "all" else [
         e.strip() for e in args.exp.split(",")
     ]
-    output_dir = args.output_dir / datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if args.resume_dir:
+        output_dir = args.resume_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        output_dir = args.output_dir / datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     print("Loading pipeline ...")
     pipeline = MeddiagPipeline(
@@ -583,19 +601,22 @@ def main() -> None:
     rag_bs_mean:    float | None = None
     no_rag_bs_mean: float | None = None
 
+    def _n(exp_id: str) -> int:
+        return min(args.max_samples, _EXP_CAPS.get(exp_id, args.max_samples))
+
     _dispatch = {
-        "1":  lambda: exp1_nih_classification(pipeline, output_dir, args.max_samples),
-        "2":  lambda: exp2_rag_quality(pipeline, output_dir, args.max_samples),
+        "1":  lambda: exp1_nih_classification(pipeline, output_dir, _n("1")),
+        "2":  lambda: exp2_rag_quality(pipeline, output_dir, _n("2")),
         "3":  lambda: exp3_bertscore_comparison(
-                    pipeline, output_dir, args.max_samples,
+                    pipeline, output_dir, _n("3"),
                     rag_bertscore_mean=rag_bs_mean,
                     no_rag_bertscore_mean=no_rag_bs_mean),
-        "4a": lambda: exp4a_sycophancy(pipeline, output_dir, args.max_samples),
-        "4b": lambda: exp4b_ood_padchest(pipeline, output_dir, args.max_samples),
-        "5":  lambda: exp5_green(pipeline, output_dir, args.max_samples),
-        "6":  lambda: exp6_calibration(pipeline, output_dir, args.max_samples),
-        "7":  lambda: exp7_rag_ablation(pipeline, output_dir, args.max_samples),
-        "8":  lambda: exp8_energy(pipeline, output_dir, args.max_samples, args.tgp_w),
+        "4a": lambda: exp4a_sycophancy(pipeline, output_dir, _n("4a")),
+        "4b": lambda: exp4b_ood_padchest(pipeline, output_dir, _n("4b")),
+        "5":  lambda: exp5_green(pipeline, output_dir, _n("5")),
+        "6":  lambda: exp6_calibration(pipeline, output_dir, _n("6")),
+        "7":  lambda: exp7_rag_ablation(pipeline, output_dir, _n("7")),
+        "8":  lambda: exp8_energy(pipeline, output_dir, _n("8"), args.tgp_w),
     }
 
     for exp_id in exps:

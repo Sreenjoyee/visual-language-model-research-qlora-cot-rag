@@ -27,7 +27,7 @@ from .config import CONFIG, Config
 from .llm import LoadedLLM, load_llm
 from .output_parser import parse_output
 from .projector import PerceiverResampler
-from .prompts import IMAGE_PLACEHOLDER, build_chat_messages
+from .prompts import IMAGE_PLACEHOLDER, build_caption_messages, build_chat_messages
 from .retrieval import RetrievedSnippet, Retriever
 from .vision import VisionEncoder
 
@@ -100,15 +100,31 @@ class MeddiagPipeline:
         """Get the LLM's input embeddings for token ids, in the LLM's dtype."""
         return self.llm.model.get_input_embeddings()(input_ids)
 
-    def _build_retrieval_query(self) -> str:
-        """Query text for FAISS.
+    def _caption_image(self, visual_embeds: torch.Tensor) -> str:
+        """Quick 64-token caption pass to produce an image-specific FAISS query.
 
-        First pass: use a generic clinical prompt. A better approach (future work)
-        is to caption the image with the base LLM first and use that caption as
-        the query — but that adds a forward pass and complicates the RAG-off
-        baseline comparison. Keeping it simple and honest for now.
+        Runs the LLM with a lightweight describe-the-image prompt and the same
+        visual embeddings used for diagnosis. The output is used only as a text
+        query for FAISS — it is not shown to the user.
         """
-        return "Chest X-ray findings and clinical impression."
+        messages = build_caption_messages()
+        prompt_text = self.llm.tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs_embeds, attention_mask = self._splice_visual(prompt_text, visual_embeds)
+        output_ids = self.llm.model.generate(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            max_new_tokens=64,
+            do_sample=False,
+            pad_token_id=self.llm.tokenizer.pad_token_id,
+        )
+        caption = self.llm.tokenizer.decode(output_ids[0], skip_special_tokens=True).strip()
+        if not caption:
+            caption = "Chest X-ray findings and clinical impression."
+        if self.config.debug_vision:
+            print(f"[caption] {caption}")
+        return caption
 
     def _splice_visual(
         self,
@@ -160,8 +176,8 @@ class MeddiagPipeline:
         # 2. Projector
         visual_embeds = self.projector(vision_tokens)                  # (1, K, D_llm)
 
-        # 3. Retrieval
-        query = self._build_retrieval_query()
+        # 3. Retrieval — caption pass gives image-specific FAISS query
+        query = self._caption_image(visual_embeds)
         retrieved = self.retriever.query(query, k=self.config.retrieval_top_k)
         snippets = [r.text for r in retrieved]
 

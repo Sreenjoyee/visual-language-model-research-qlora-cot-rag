@@ -1,0 +1,21 @@
+{
+  "experiment": 5,
+  "dataset": "MIMIC-CXR",
+  "n_samples": 100,
+  "green": {
+    "G_groundedness": 1.0,
+    "R_reasoning": 1.0,
+    "E_alignment": 1.0,
+    "E_error_free": 1.0,
+    "N_numerical": 0.6501,
+    "composite": 0.93
+  },
+  "classification": {
+    "accuracy": 0.6,
+    "precision": 0.6056,
+    "recall": 0.7818,
+    "f1": 0.6825,
+    "support_pos": 55,
+    "support_neg": 45
+  }
+}
