@@ -66,7 +66,8 @@ def build_inference_prompt(retrieved_snippets: Sequence[str]) -> str:
         "REASONING:\n"
         "1. Visual observations: <what you see in the image>\n"
         "2. Clinical interpretation: <map observations to clinical meaning>\n"
-        "3. Evidence support: <how the retrieved evidence supports or contradicts>\n"
+        "3. Evidence support: <quote or paraphrase the exact text from the retrieved "
+        "evidence snippets that supports or contradicts your interpretation>\n"
         "4. Justification: <why the final diagnosis follows>\n"
     )
     return user_content
@@ -77,6 +78,24 @@ def build_chat_messages(retrieved_snippets: Sequence[str]) -> list[dict]:
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": build_inference_prompt(retrieved_snippets)},
+    ]
+
+
+def build_caption_messages() -> list[dict]:
+    """Short prompt for the caption pass — describes image findings for FAISS query.
+
+    Deliberately separate from build_chat_messages so the caption prompt never
+    bleeds into the diagnosis prompt and vice versa.
+    """
+    return [
+        {
+            "role": "system",
+            "content": "You are a radiologist. Describe the key imaging findings in this chest X-ray in 1-2 sentences.",
+        },
+        {
+            "role": "user",
+            "content": f"Describe the key findings in this chest X-ray:\n{IMAGE_PLACEHOLDER}",
+        },
     ]
 
 
@@ -94,7 +113,9 @@ _CLASSIFICATION_TARGETS: dict[str, str] = {
         "1. Visual observations: The chest radiograph shows clear lung fields bilaterally "
         "with no focal consolidation, effusion, or pneumothorax.\n"
         "2. Clinical interpretation: No acute cardiopulmonary abnormality identified.\n"
-        "3. Evidence support: Retrieved clinical evidence supports a normal chest appearance.\n"
+        "3. Evidence support: Evidence states 'normal chest radiograph with clear lung fields "
+        "and no acute cardiopulmonary process', which aligns with the clear bilateral lung "
+        "fields observed.\n"
         "4. Justification: Findings are consistent with a normal chest radiograph.\n"
     ),
     "ABNORMAL": (
@@ -104,7 +125,8 @@ _CLASSIFICATION_TARGETS: dict[str, str] = {
         "1. Visual observations: The chest radiograph demonstrates pathological findings "
         "including abnormal opacity, effusion, or structural change.\n"
         "2. Clinical interpretation: Acute or significant cardiopulmonary abnormality is present.\n"
-        "3. Evidence support: Retrieved clinical evidence is consistent with an abnormal presentation.\n"
+        "3. Evidence support: Evidence describes 'increased opacity in the lower lobe consistent "
+        "with consolidation or effusion', matching the abnormal density pattern seen in the image.\n"
         "4. Justification: Findings are consistent with an abnormal chest radiograph.\n"
     ),
 }

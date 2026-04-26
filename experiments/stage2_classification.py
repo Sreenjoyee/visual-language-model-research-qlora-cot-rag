@@ -57,7 +57,7 @@ from src.vision import VisionEncoder
 LORA_R = 16
 LORA_ALPHA = 32
 LORA_DROPOUT = 0.05
-LORA_TARGET_MODULES = ["q_proj", "v_proj"]   # SRS §7 — exactly these two
+LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
 
 
 def _apply_lora(model, config: Config):
@@ -118,8 +118,9 @@ def _encode_example(
     device = llm.device
     tokenizer = llm.tokenizer
 
-    # 1. FAISS retrieval — same query as inference (not report text, to match SRS §12)
-    retrieved = retriever.query("Chest X-ray findings and clinical impression.", k=config.retrieval_top_k)
+    # 1. FAISS retrieval — use actual report text as query during training.
+    # At inference the model generates its own caption; report is unavailable.
+    retrieved = retriever.query(pair.report[:300], k=config.retrieval_top_k)
     snippets = [r.text for r in retrieved]
 
     # 2. Build prompt — identical to inference (SRS §12)
@@ -258,7 +259,7 @@ def train(
     projector.eval()
     vision.eval()
 
-    print("[stage2] Applying LoRA (q_proj, v_proj)...")
+    print(f"[stage2] Applying LoRA ({', '.join(LORA_TARGET_MODULES)})...")
     llm.model = _apply_lora(llm.model, config)
     llm.model.train()
 
@@ -392,9 +393,9 @@ def train(
     if global_step > 0:
         row = {
             "step": global_step, "epoch": epochs - 1,
-            "loss": round(accum_loss / max(micro_step % grad_accum_steps or grad_accum_steps, 1), 4),
+            "loss": round(accum_loss / (micro_step % grad_accum_steps or grad_accum_steps), 4),
             "lr": round(scheduler.get_last_lr()[0], 8),
-            "vram_gb": round(torch.cuda.memory_allocated() / (1024 ** 3), 2) if torch.cuda.is_available() else 0.0,
+            "vram_gb": round(torch.cuda.memory_allocated(llm.device) / (1024 ** 3), 2) if llm.device.type == "cuda" else 0.0,
             "elapsed_s": round(time.time() - t_start, 1),
         }
         log_f.write(json.dumps(row) + "\n")

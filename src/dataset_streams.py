@@ -197,14 +197,20 @@ def padchest_stream(
     if ds is None:
         raise RuntimeError(f"Could not load PadChest. Last error: {last_err}")
 
-    count = 0
+    # Balanced sampling: collect into per-class queues, yield alternating NORMAL/ABNORMAL.
+    from collections import deque
+    queues: dict[str, deque] = {"NORMAL": deque(), "ABNORMAL": deque()}
+    classes = ["NORMAL", "ABNORMAL"]
+    class_idx = 0
+    total_yielded = 0
+    scanned = 0
     retry_delay = 30
+
     while True:
         try:
-            stream = ds.skip(count) if count > 0 else ds
+            stream = ds.skip(scanned) if scanned > 0 else ds
             for ex in stream:
-                if count >= max_samples:
-                    return
+                scanned += 1
                 try:
                     img = _to_pil(ex.get("image") or ex.get("jpg") or ex.get("img"))
                 except Exception:
@@ -214,11 +220,29 @@ def padchest_stream(
                     raw_labels = "|".join(str(l) for l in raw_labels)
                 label = "NORMAL" if "normal" in str(raw_labels).lower() else "ABNORMAL"
                 report = str(ex.get("sentence_en", ex.get("report", ex.get("findings", ""))))
-                yield LabeledPair(image=img, report=report, label=label, source="padchest")
-                count += 1
+                pair = LabeledPair(image=img, report=report, label=label, source="padchest")
+
+                if len(queues[label]) < 64:
+                    queues[label].append(pair)
+
+                # Yield whenever both queues have at least one item
+                while queues["NORMAL"] and queues["ABNORMAL"]:
+                    yield queues[classes[class_idx]].popleft()
+                    class_idx = 1 - class_idx
+                    total_yielded += 1
+                    if total_yielded >= max_samples:
+                        imbalance = scanned - total_yielded
+                        if imbalance > 0:
+                            print(f"PadChest class imbalance: scanned {scanned}, yielded {total_yielded} balanced pairs.")
+                        return
+            # Stream exhausted — drain whichever class still has items
+            for cls in classes:
+                while queues[cls] and total_yielded < max_samples:
+                    yield queues[cls].popleft()
+                    total_yielded += 1
             return
         except _NET_ERRORS as e:
-            print(f"[padchest_stream] Network error at sample {count}: {e}. Reconnecting in {retry_delay}s...")
+            print(f"[padchest_stream] Network error after {scanned} scanned: {e}. Reconnecting in {retry_delay}s...")
             time.sleep(retry_delay)
             retry_delay = min(retry_delay * 2, 300)
             try:
