@@ -183,10 +183,10 @@ if [[ $SMOKE -eq 1 ]]; then
     GRAD_ACCUM=1  # smoke: 2 pairs × 3 epochs = 6 steps; accum=1 ensures updates fire
     echo "[info] SMOKE mode — minimal 2-pair run for pipeline verification (CPU-safe)"
 else
-    MAX_PAIRS_S1=5000
-    MAX_PAIRS_S2=1000
-    WARMUP_S1=100
-    WARMUP_S2=50
+    MAX_PAIRS_S1=10000
+    MAX_PAIRS_S2=4000
+    WARMUP_S1=200
+    WARMUP_S2=150
     SAVE_EVERY=500
     EVAL_SAMPLES=200
     ROBUSTNESS_SAMPLES=50
@@ -229,6 +229,12 @@ else
         retry_net python -m scripts.build_faiss_index --max-mimic 20000 --max-pubmed 300 --max-iuxray 2000
         echo "[ok] FAISS index built"
     fi
+    # Verify index files are non-empty — catches power-cut mid-write
+    if [[ ! -s "${MEDDIAG_FAISS_INDEX_DIR:-faiss_index}/index.faiss" || \
+          ! -s "${MEDDIAG_FAISS_INDEX_DIR:-faiss_index}/meta.jsonl" ]]; then
+        echo "[error] FAISS files missing or empty after build — aborting"
+        exit 1
+    fi
     _mark_done "step1"
 fi
 
@@ -246,14 +252,18 @@ else
     RESUME_S1=""
     LATEST_S1_CKPT=$(ls -t models/projector_step*.pt 2>/dev/null | head -1 || true)
     if [[ -n "$LATEST_S1_CKPT" ]]; then
-        echo "[resume] Stage 1 checkpoint found: $LATEST_S1_CKPT"
-        RESUME_S1="--resume-from $LATEST_S1_CKPT"
+        if python -c "import torch; torch.load('$LATEST_S1_CKPT', map_location='cpu')" 2>/dev/null; then
+            echo "[resume] Stage 1 checkpoint valid: $LATEST_S1_CKPT"
+            RESUME_S1="--resume-from $LATEST_S1_CKPT"
+        else
+            echo "[warn] Stage 1 checkpoint corrupted (power loss?): $LATEST_S1_CKPT — starting fresh"
+        fi
     fi
 
     wait_for_network
     python -m experiments.stage1_projector \
         --max-pairs        "$MAX_PAIRS_S1" \
-        --epochs           1 \
+        --epochs           2 \
         --lr               1e-4 \
         --warmup-steps     "$WARMUP_S1" \
         --grad-accum-steps "$GRAD_ACCUM" \
@@ -272,22 +282,26 @@ if _stage_done "step3"; then
     echo "[skip] Step 3 already done (--resume)"
 elif [[ $SKIP_TRAIN -eq 1 || $STAGE1_ONLY -eq 1 ]]; then
     echo "[skip] skipped by flag"
-elif [[ -d "$LORA_DIR" ]]; then
-    echo "[skip] LoRA adapter already exists at $LORA_DIR"
+elif [[ -d "$LORA_DIR" && -f "models/cls_head.pt" ]]; then
+    echo "[skip] LoRA adapter and cls_head.pt already exist — Stage 2 up to date"
     _mark_done "step3"
 else
     RESUME_S2=""
     LATEST_S2_CKPT=$(ls -dt models/lora_step* 2>/dev/null | head -1 || true)
     if [[ -n "$LATEST_S2_CKPT" && -f "$LATEST_S2_CKPT/train_state.pt" ]]; then
-        echo "[resume] Stage 2 checkpoint found: $LATEST_S2_CKPT"
-        RESUME_S2="--resume-from $LATEST_S2_CKPT"
+        if python -c "import torch; torch.load('$LATEST_S2_CKPT/train_state.pt', map_location='cpu')" 2>/dev/null; then
+            echo "[resume] Stage 2 checkpoint valid: $LATEST_S2_CKPT"
+            RESUME_S2="--resume-from $LATEST_S2_CKPT"
+        else
+            echo "[warn] Stage 2 checkpoint corrupted (power loss?): $LATEST_S2_CKPT — starting fresh"
+        fi
     fi
 
     wait_for_network
     python -m experiments.stage2_classification \
         --projector-path   "$PROJECTOR_PATH" \
         --max-pairs        "$MAX_PAIRS_S2" \
-        --epochs           2 \
+        --epochs           3 \
         --lr               2e-4 \
         --warmup-steps     "$WARMUP_S2" \
         --grad-accum-steps "$GRAD_ACCUM" \
@@ -310,7 +324,8 @@ else
         LORA_ARG="--lora-adapter-dir $LORA_DIR"
     fi
 
-    python -m experiments.evaluate \
+    wait_for_network
+    retry_net python -m experiments.evaluate \
         --projector-path "$PROJECTOR_PATH" \
         $LORA_ARG \
         --max-samples          "$EVAL_SAMPLES" \
@@ -367,7 +382,8 @@ else
         fi
     fi
 
-    python -m experiments.run_experiments \
+    wait_for_network
+    retry_net python -m experiments.run_experiments \
         --exp          "$EXP_IDS" \
         --projector    "$PROJECTOR_PATH" \
         $LORA_EXP_ARG \
@@ -422,8 +438,9 @@ pipe = MeddiagPipeline(
     lora_adapter_dir=Path(lora_dir) if os.path.isdir(lora_dir) else None,
 )
 result = pipe.diagnose("sample_xray.jpg")
-print("  Prediction :", result.diagnosis)
-print("  Reasoning  :", result.reasoning[:200], "...")
+print("  Prediction  :", result.diagnosis)
+print("  Confidence  :", f"{result.cls_confidence:.3f} (cls_head)" if result.cls_confidence is not None else "N/A (text-parse fallback)")
+print("  Reasoning   :", result.reasoning[:200], "...")
 EOF
     else
         echo "[skip] sample_xray.jpg not found; skipping inference demo"
@@ -439,6 +456,7 @@ echo "║         MEDDIAG pipeline complete        ║"
 echo "╠══════════════════════════════════════════╣"
 echo "║  Projector   : $PROJECTOR_PATH"
 echo "║  LoRA        : ${LORA_DIR:-none}"
+echo "║  Cls head    : models/cls_head.pt"
 echo "║  Eval report : $LOG_DIR/eval_report_*.json"
 echo "║  Plots       : $DIAG_DIR/*.png"
 echo "║  Exp reports : $REPORTS_DIR/"

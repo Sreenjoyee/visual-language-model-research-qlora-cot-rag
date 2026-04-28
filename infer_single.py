@@ -22,8 +22,8 @@ def run(image_path: str, projector: str, lora: str | None) -> None:
     print("\n[1/4] Loading pipeline (this takes ~20s)...")
     pipe = MeddiagPipeline(
         config=CONFIG,
-        projector_path=projector,
-        lora_adapter_dir=lora if lora and Path(lora).is_dir() else None,
+        projector_weights=Path(projector),
+        lora_adapter_dir=Path(lora) if lora and Path(lora).is_dir() else None,
     )
     print("      Pipeline ready.")
 
@@ -35,33 +35,28 @@ def run(image_path: str, projector: str, lora: str | None) -> None:
 
     # ── Run inference ──────────────────────────────────────────
     print("\n[3/4] Running inference (RAG + CoT generation)...")
-    result = pipe(img)
+    result = pipe.diagnose(image_path)
     print("      Done.")
 
     # ── Print results ──────────────────────────────────────────
     print("\n[4/4] Results")
     print("=" * 60)
 
-    diagnosis = result.get("diagnosis", "UNKNOWN")
-    confidence = result.get("p_abnormal", None)
-    response = result.get("response", "")
-    context = result.get("retrieved_context", "")
-
     # Diagnosis banner
-    colour = "ABNORMAL ⚠" if diagnosis == "ABNORMAL" else "NORMAL ✓"
+    colour = "ABNORMAL ⚠" if result.diagnosis == "ABNORMAL" else "NORMAL ✓"
     print(f"\n  DIAGNOSIS   : {colour}")
-    if confidence is not None:
-        print(f"  P(ABNORMAL) : {confidence:.3f}")
+    if result.cls_confidence is not None:
+        print(f"  P(ABNORMAL) : {result.cls_confidence:.3f}  (classification head)")
 
     # Retrieved evidence
-    if context:
+    if result.retrieved:
         print("\n── Retrieved Evidence (RAG) " + "─" * 33)
-        for i, line in enumerate(context.strip().split("\n")[:6], 1):
-            print(f"  [{i}] {line[:120]}")
+        for snippet in result.retrieved[:6]:
+            print(f"  [{result.retrieved.index(snippet) + 1}] {snippet.text[:120]}")
 
     # Full CoT response
     print("\n── Model Response (Chain-of-Thought) " + "─" * 23)
-    wrapped = textwrap.fill(response.strip(), width=70,
+    wrapped = textwrap.fill(result.reasoning.strip(), width=70,
                             initial_indent="  ", subsequent_indent="  ")
     print(wrapped)
 

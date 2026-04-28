@@ -23,6 +23,9 @@ from pathlib import Path
 import torch
 from PIL import Image
 
+import numpy as np
+
+from .classification_head import ClassificationHead
 from .config import CONFIG, Config
 from .llm import LoadedLLM, load_llm
 from .output_parser import parse_output
@@ -39,6 +42,7 @@ class DiagnosisResult:
     reasoning: str                     # free-text reasoning block
     retrieved: list[RetrievedSnippet]  # what we fed in (full snippets)
     raw_output: str                    # untouched model output, for debugging
+    cls_confidence: float | None = None  # P(ABNORMAL) from ClassificationHead; None if head unavailable
 
 
 class MeddiagPipeline:
@@ -84,7 +88,9 @@ class MeddiagPipeline:
         )
         if projector_weights is not None and projector_weights.exists():
             state = torch.load(projector_weights, map_location="cpu")
-            self.projector.load_state_dict(state)
+            # strict=False: Stage-1 checkpoints predate input_norm; missing keys
+            # (input_norm.weight/bias) initialise to identity, which is correct.
+            self.projector.load_state_dict(state, strict=False)
         # Even pre-training, move projector to the LLM's device so splicing works.
         self.projector.to(self.llm.device)
         self.vision.to(self.llm.device)
@@ -93,6 +99,22 @@ class MeddiagPipeline:
         # Retriever: load from disk. If missing, fail loudly — FAISS is mandatory.
         self.retriever = Retriever(config)
         self.retriever.load()  # raises FileNotFoundError with a helpful message
+
+        # Classification head — optional at inference time. When absent the pipeline
+        # falls back to parsing LLaMA's generated DIAGNOSIS token (legacy behaviour).
+        self.cls_head: ClassificationHead | None = None
+        cls_path = config.cls_head_path
+        if cls_path.exists():
+            self.cls_head = ClassificationHead(
+                llm_dim=self.llm.hidden_dim,
+                rag_dim=config.embedder_dim,
+                hidden_dim=config.cls_hidden_dim,
+            )
+            state = torch.load(cls_path, map_location="cpu")
+            self.cls_head.load_state_dict(state)
+            self.cls_head.to(self.llm.device)
+            self.cls_head.eval()
+            print(f"[pipeline] ClassificationHead loaded from {cls_path}")
 
     # -------- helpers --------
 
@@ -181,7 +203,22 @@ class MeddiagPipeline:
         retrieved = self.retriever.query(query, k=self.config.retrieval_top_k)
         snippets = [r.text for r in retrieved]
 
-        # 4. Build chat text via the tokenizer's own chat template — no hand-rolled
+        # 4. Classification head — runs on visual features + RAG embeddings directly,
+        #    bypassing LLaMA. This is the primary classification signal when the head
+        #    is available; LLaMA generation is used only for reasoning text.
+        cls_diagnosis = None
+        cls_confidence = None
+        if self.cls_head is not None:
+            rag_embs = [r.embedding for r in retrieved if r.embedding is not None]
+            if rag_embs:
+                rag_tensor = torch.from_numpy(np.stack(rag_embs)).unsqueeze(0)  # (1, k, 384)
+                rag_tensor = rag_tensor.to(self.llm.device)
+                logits = self.cls_head(visual_embeds, rag_tensor)               # (1, 2)
+                probs = torch.softmax(logits, dim=-1)
+                cls_confidence = probs[0, 1].item()                             # P(ABNORMAL)
+                cls_diagnosis = "ABNORMAL" if cls_confidence >= self.config.classification_threshold else "NORMAL"
+
+        # 5. Build chat text via the tokenizer's own chat template — no hand-rolled
         #    special tokens. This renders system+user turns into a single string.
         messages = build_chat_messages(snippets)
         prompt_text = self.llm.tokenizer.apply_chat_template(
@@ -190,10 +227,10 @@ class MeddiagPipeline:
             add_generation_prompt=True,
         )
 
-        # 5. Splice visual embeddings
+        # 6. Splice visual embeddings
         inputs_embeds, attention_mask = self._splice_visual(prompt_text, visual_embeds)
 
-        # 6. Generate — inputs_embeds + attention_mask ONLY (SRS §5)
+        # 7. Generate — inputs_embeds + attention_mask ONLY (SRS §5)
         gen_kwargs = dict(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
@@ -212,10 +249,14 @@ class MeddiagPipeline:
         raw_text = self.llm.tokenizer.decode(output_ids[0], skip_special_tokens=True)
 
         parsed = parse_output(raw_text)
+        # Classification head takes precedence over LLaMA's parsed DIAGNOSIS token.
+        # If head is unavailable, fall back to the legacy text-parsing path.
+        final_diagnosis = cls_diagnosis if cls_diagnosis is not None else parsed["diagnosis"]
         return DiagnosisResult(
-            diagnosis=parsed["diagnosis"],
+            diagnosis=final_diagnosis,
             evidence_used=parsed["evidence_used"],
             reasoning=parsed["reasoning"],
             retrieved=retrieved,
             raw_output=raw_text,
+            cls_confidence=cls_confidence,
         )

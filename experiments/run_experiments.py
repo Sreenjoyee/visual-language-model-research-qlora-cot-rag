@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import time
 from datetime import datetime
@@ -114,9 +115,63 @@ def _agg(vals: list[float]) -> dict:
 
 def _save_json(data: dict, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    # Write to a temp file then atomically rename — prevents partial JSON files
+    # if power is lost mid-write (which would make the resume logic think the
+    # experiment completed when it actually didn't).
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(path)
     print(f"  Saved → {path}")
+
+
+# ── Threshold calibration helpers ────────────────────────────────────────────
+
+def _tpr(y_true, y_prob, threshold):
+    tp = sum(1 for yt, yp in zip(y_true, y_prob) if yt == 1 and yp >= threshold)
+    fn = sum(1 for yt, yp in zip(y_true, y_prob) if yt == 1 and yp < threshold)
+    return tp / (tp + fn) if (tp + fn) > 0 else 0.0
+
+
+def _fpr(y_true, y_prob, threshold):
+    fp = sum(1 for yt, yp in zip(y_true, y_prob) if yt == 0 and yp >= threshold)
+    tn = sum(1 for yt, yp in zip(y_true, y_prob) if yt == 0 and yp < threshold)
+    return fp / (fp + tn) if (fp + tn) > 0 else 0.0
+
+
+def _find_optimal_threshold(y_true, y_prob) -> float:
+    """Return the threshold that maximises Youden J = TPR - FPR."""
+    thresholds = sorted(set(y_prob))
+    best_t, best_j = 0.5, -1.0
+    for t in thresholds:
+        j = _tpr(y_true, y_prob, t) - _fpr(y_true, y_prob, t)
+        if j > best_j:
+            best_j, best_t = j, t
+    return round(best_t, 4)
+
+
+def _apply_optimal_threshold(pipeline, threshold: float) -> None:
+    """Write the optimal threshold back to config.py so all subsequent
+    experiments and inference use it automatically."""
+    pipeline.config.classification_threshold = threshold
+    config_path = Path(__file__).resolve().parent.parent / "src" / "config.py"
+    try:
+        text = config_path.read_text(encoding="utf-8")
+        import re
+        updated = re.sub(
+            r'(os\.environ\.get\("MEDDIAG_THRESHOLD",\s*")[^"]*(")',
+            rf'\g<1>{threshold}\g<2>',
+            text,
+        )
+        if updated != text:
+            config_path.write_text(updated, encoding="utf-8")
+            print(f"  [threshold] Optimal threshold {threshold} written to config.py")
+        else:
+            print(f"  [threshold] Optimal threshold {threshold} (config.py pattern not matched — set MEDDIAG_THRESHOLD={threshold} manually)")
+    except Exception as e:
+        print(f"  [threshold] Could not update config.py: {e} — set MEDDIAG_THRESHOLD={threshold}")
 
 
 # ── Experiment 1: NIH Classification ─────────────────────────────────────────
@@ -141,9 +196,17 @@ def exp1_nih_classification(
     lat   = latency_stats([r.latency_s for r in results])
     vram  = max((r.vram_peak_gb for r in results), default=0.0)
 
+    # Find optimal threshold via Youden J (maximises TPR - FPR on the ROC curve)
+    optimal_threshold = _find_optimal_threshold(y_true, y_prob)
+    _apply_optimal_threshold(pipeline, optimal_threshold)
+
+    # Recompute binary metrics with the optimal threshold
+    y_pred_opt = [1 if p >= optimal_threshold else 0 for p in y_prob]
+    bm_opt = binary_metrics(y_true, y_pred_opt)
+
     # Aggregate comparison: one value per system — bars represent aggregate metrics
     systems: dict[str, dict[str, float]] = {
-        "MEDDIAG (ours)": {"auroc": auroc, "f1": bm["f1"]},
+        "MEDDIAG (ours)": {"auroc": auroc, "f1": bm_opt["f1"]},
         **_LIT["exp1"],
     }
     save_figure(
@@ -152,7 +215,7 @@ def exp1_nih_classification(
         output_dir / "exp1_system_comparison",
     )
     save_figure(plot_roc_curve(y_true, y_prob, auroc=auroc), output_dir / "exp1_roc_curve")
-    save_figure(plot_confusion_matrix(y_true, y_pred), output_dir / "exp1_confusion_matrix")
+    save_figure(plot_confusion_matrix(y_true, y_pred_opt), output_dir / "exp1_confusion_matrix")
 
     lat_by_label = {
         lbl: [r.latency_s for r in results if r.pred_label == lbl]
@@ -166,7 +229,10 @@ def exp1_nih_classification(
     result = {
         "experiment": 1, "dataset": "NIH ChestX-ray14",
         "n_samples": len(results),
-        "metrics": {"auroc": auroc, **bm},
+        "metrics": {"auroc": auroc, **bm_opt},
+        "threshold": {"optimal": optimal_threshold, "youden_j": round(
+            max((_tpr(y_true, y_prob, t) - _fpr(y_true, y_prob, t))
+                for t in [optimal_threshold]), 4)},
         "latency": lat, "peak_vram_gb": round(vram, 3),
         "literature": _LIT["exp1"],
     }

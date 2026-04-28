@@ -219,30 +219,41 @@ class TestStage2Checkpoint:
 
         return FakeLoraModel()
 
+    def _fake_cls_head(self):
+        from src.classification_head import ClassificationHead
+        return ClassificationHead(llm_dim=32, rag_dim=16, hidden_dim=16)
+
     def test_save_creates_train_state(self, tmp_path, tiny_proj, optimizer):
         from experiments.stage2_classification import _save_checkpoint_s2
         model = self._fake_model()
+        cls_head = self._fake_cls_head()
+        cls_head_path = tmp_path / "cls_head.pt"
         scheduler = get_cosine_schedule_with_warmup(optimizer, 5, 50)
         ckpt_dir = tmp_path / "lora_step100"
-        _save_checkpoint_s2(ckpt_dir, model, optimizer, scheduler, step=100, epoch=0)
+        _save_checkpoint_s2(ckpt_dir, model, cls_head, cls_head_path, optimizer, scheduler, step=100, epoch=0)
         assert (ckpt_dir / "train_state.pt").exists()
         assert (ckpt_dir / "model.pt").exists()
+        assert cls_head_path.exists()
 
     def test_train_state_keys(self, tmp_path, tiny_proj, optimizer):
         from experiments.stage2_classification import _save_checkpoint_s2
         model = self._fake_model()
+        cls_head = self._fake_cls_head()
+        cls_head_path = tmp_path / "cls_head.pt"
         scheduler = get_cosine_schedule_with_warmup(optimizer, 5, 50)
         ckpt_dir = tmp_path / "lora_ckpt"
-        _save_checkpoint_s2(ckpt_dir, model, optimizer, scheduler, step=50, epoch=1)
+        _save_checkpoint_s2(ckpt_dir, model, cls_head, cls_head_path, optimizer, scheduler, step=50, epoch=1)
         state = torch.load(ckpt_dir / "train_state.pt", map_location="cpu")
         assert {"step", "epoch", "optimizer", "scheduler"} <= set(state.keys())
 
     def test_train_state_step_epoch(self, tmp_path, tiny_proj, optimizer):
         from experiments.stage2_classification import _save_checkpoint_s2
         model = self._fake_model()
+        cls_head = self._fake_cls_head()
+        cls_head_path = tmp_path / "cls_head.pt"
         scheduler = get_cosine_schedule_with_warmup(optimizer, 5, 50)
         ckpt_dir = tmp_path / "ckpt"
-        _save_checkpoint_s2(ckpt_dir, model, optimizer, scheduler, step=99, epoch=3)
+        _save_checkpoint_s2(ckpt_dir, model, cls_head, cls_head_path, optimizer, scheduler, step=99, epoch=3)
         state = torch.load(ckpt_dir / "train_state.pt", map_location="cpu")
         assert state["step"] == 99
         assert state["epoch"] == 3

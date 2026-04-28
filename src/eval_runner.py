@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Iterator
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
@@ -120,6 +121,28 @@ def _diagnose_scored(
         snippets = [r.text for r in retrieved]
         retrieved_list = retrieved
 
+    # Classification head — mirrors pipeline.diagnose() exactly.
+    # When the head is available it is the authoritative classification signal;
+    # LLaMA generation is used only for reasoning text and evidence citations.
+    # In no_rag mode (RAG ablation) there are no retrieved embeddings, so the
+    # head cannot run and we fall back to text-parsing p_abnormal.
+    cls_diagnosis: str | None = None
+    cls_confidence: float | None = None
+    if pipeline.cls_head is not None and retrieved_list:
+        rag_embs = [r.embedding for r in retrieved_list if r.embedding is not None]
+        if not rag_embs:
+            print("[warn] cls_head loaded but all retrieved embeddings are None — falling back to text-parse")
+        if rag_embs:
+            rag_tensor = torch.from_numpy(np.stack(rag_embs)).unsqueeze(0).to(device)
+            logits = pipeline.cls_head(visual_embeds, rag_tensor)        # (1, 2)
+            probs = torch.softmax(logits, dim=-1)
+            cls_confidence = probs[0, 1].item()
+            cls_diagnosis = (
+                "ABNORMAL"
+                if cls_confidence >= pipeline.config.classification_threshold
+                else "NORMAL"
+            )
+
     # Build prompt — identical to inference (SRS §12)
     messages = build_chat_messages(snippets)
     prompt_text = pipeline.llm.tokenizer.apply_chat_template(
@@ -156,14 +179,20 @@ def _diagnose_scored(
             raise RuntimeError(f"Unexpected error in p_abnormal extraction: {e}") from e
 
     parsed = parse_output(raw_text)
+    # cls_head takes precedence over text-parsing for the binary label.
+    final_diagnosis = cls_diagnosis if cls_diagnosis is not None else parsed["diagnosis"]
     diag = DiagnosisResult(
-        diagnosis=parsed["diagnosis"],
+        diagnosis=final_diagnosis,
         evidence_used=parsed["evidence_used"],
         reasoning=parsed["reasoning"],
         retrieved=retrieved_list,
         raw_output=raw_text,
+        cls_confidence=cls_confidence,
     )
-    return diag, p_abn
+    # Prefer cls_head probability for AUROC/ECE — it is a proper softmax probability
+    # rather than a logit-heuristic extracted from the label token.
+    final_p_abn = cls_confidence if cls_confidence is not None else p_abn
+    return diag, final_p_abn
 
 
 def run_eval_stream(

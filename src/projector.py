@@ -39,6 +39,12 @@ class PerceiverResampler(nn.Module):
         self.num_latents = num_latents
         self.llm_dim = llm_dim
 
+        # Normalise raw vision features before projection — domain-agnostic scale/shift.
+        # Initialises to identity (weight=1, bias=0); trained in Stage 2 while the
+        # rest of the projector stays frozen. Loaded with strict=False so Stage-1
+        # checkpoints that predate this layer still work.
+        self.input_norm = nn.LayerNorm(vision_dim)
+
         # Project vision features to LLM dim so cross-attn k/v live in the same space
         self.vision_proj = nn.Linear(vision_dim, llm_dim)
         self.vision_norm = nn.LayerNorm(llm_dim)
@@ -79,7 +85,7 @@ class PerceiverResampler(nn.Module):
         """
         B = vision_tokens.shape[0]
         # Compute in fp32 for numerical stability, cast at the end
-        v = self.vision_norm(self.vision_proj(vision_tokens.float()))  # (B, N, D)
+        v = self.vision_norm(self.vision_proj(self.input_norm(vision_tokens.float())))  # (B, N, D)
         q = self.latents.unsqueeze(0).expand(B, -1, -1).contiguous()   # (B, K, D)
 
         for block in self.layers:
