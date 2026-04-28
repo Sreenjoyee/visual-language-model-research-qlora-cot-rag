@@ -148,7 +148,10 @@ def iu_xray_normal_stream(max_samples: int = 50) -> Iterator[LabeledPair]:
             for ex in stream:
                 if count >= max_samples:
                     return
-                report = str(ex.get("Caption", ex.get("impression", ex.get("findings", ex.get("report", ""))))).lower()
+                report = str(
+                    ex.get("Caption") or ex.get("impression") or
+                    ex.get("findings") or ex.get("report") or ""
+                ).lower()
                 if not report or "normal" not in report:
                     continue
                 if any(p in report for p in _PATHOLOGY):

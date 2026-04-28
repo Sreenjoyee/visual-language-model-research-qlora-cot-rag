@@ -39,10 +39,13 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.optim import AdamW
 from transformers import get_cosine_schedule_with_warmup
 
+from src.classification_head import ClassificationHead
 from src.config import CONFIG, Config
 from src.data.balanced_stream import LabeledPair, balanced_mimic_stream, check_label_distribution
 from src.llm import LoadedLLM, load_llm
@@ -96,6 +99,9 @@ class BatchTensors:
     inputs_embeds: torch.Tensor   # (1, T_prompt + T_target, D)
     attention_mask: torch.Tensor  # (1, T_prompt + T_target)
     labels: torch.Tensor          # (1, T_prompt + T_target); -100 for prompt tokens
+    perceiver_out: torch.Tensor   # (1, K, D_llm) — for ClassificationHead
+    rag_embeddings: torch.Tensor  # (1, k, rag_dim) — for ClassificationHead
+    label_id: int                 # 0 = NORMAL, 1 = ABNORMAL
 
 
 def _encode_example(
@@ -105,7 +111,7 @@ def _encode_example(
     llm: LoadedLLM,
     retriever: Retriever,
     config: Config,
-    max_target_tokens: int = 128,
+    max_target_tokens: int = 256,
 ) -> BatchTensors:
     """Encode one labeled pair into training tensors.
 
@@ -122,6 +128,14 @@ def _encode_example(
     # At inference the model generates its own caption; report is unavailable.
     retrieved = retriever.query(pair.report[:300], k=config.retrieval_top_k)
     snippets = [r.text for r in retrieved]
+
+    # Stack RAG embeddings for ClassificationHead — fall back to zeros if any
+    # snippet is missing its embedding (shouldn't happen with IndexFlatL2).
+    rag_embs = [r.embedding for r in retrieved if r.embedding is not None]
+    if rag_embs:
+        rag_embeddings = torch.from_numpy(np.stack(rag_embs)).unsqueeze(0).float()  # (1, k, 384)
+    else:
+        rag_embeddings = torch.zeros(1, config.retrieval_top_k, config.embedder_dim)
 
     # 2. Build prompt — identical to inference (SRS §12)
     messages = build_chat_messages(snippets)
@@ -154,6 +168,7 @@ def _encode_example(
         pixel_values = vision.preprocess(pair.image).to(device)
         vision_tokens = vision(pixel_values)             # (1, N, C_v)
     visual_embeds = projector(vision_tokens)             # (1, K, D_llm) bf16
+    perceiver_out = visual_embeds                        # kept for ClassificationHead; no detach — cls_loss must reach input_norm
 
     # 5. Embed text chunks
     embed = llm.model.get_input_embeddings()
@@ -177,10 +192,15 @@ def _encode_example(
     labels = torch.full((1, T), -100, dtype=torch.long, device=device)
     labels[0, T_prompt:] = target_ids[0]
 
+    label_id = 1 if pair.label == "ABNORMAL" else 0
+
     return BatchTensors(
         inputs_embeds=inputs_embeds,
         attention_mask=attention_mask,
         labels=labels,
+        perceiver_out=perceiver_out,
+        rag_embeddings=rag_embeddings.to(device),
+        label_id=label_id,
     )
 
 
@@ -189,6 +209,8 @@ def _encode_example(
 def _save_checkpoint_s2(
     ckpt_dir: Path,
     model,
+    cls_head: ClassificationHead,
+    cls_head_path: Path,
     optimizer: AdamW,
     scheduler,
     step: int,
@@ -197,6 +219,8 @@ def _save_checkpoint_s2(
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     # LoRA adapter weights (via peft)
     model.save_pretrained(str(ckpt_dir))
+    # ClassificationHead — saved separately per SRS §15 checkpoint separation
+    torch.save(cls_head.state_dict(), cls_head_path)
     # Optimizer + scheduler state alongside the adapter
     torch.save({
         "step": step, "epoch": epoch,
@@ -243,7 +267,9 @@ def train(
     )
     if projector_path is not None and projector_path.exists():
         state = torch.load(projector_path, map_location="cpu")
-        projector.load_state_dict(state)
+        # strict=False: Stage-1 checkpoint predates input_norm; it initialises to
+        # identity so pre-trained projector behaviour is preserved at step 0.
+        projector.load_state_dict(state, strict=False)
         print(f"[stage2] Projector weights loaded from {projector_path}")
     else:
         print("[stage2] WARNING: no projector checkpoint found — using random weights.")
@@ -251,13 +277,26 @@ def train(
     vision.to(llm.device)
     projector.to(llm.device)
 
-    # Freeze vision + projector — only LoRA params train in Stage 2
+    # Freeze vision entirely — never updated
     for p in vision.parameters():
         p.requires_grad = False
-    for p in projector.parameters():
-        p.requires_grad = False
-    projector.eval()
     vision.eval()
+
+    # Freeze projector but unfreeze input_norm so it can learn domain-invariant
+    # feature scaling for OOD generalisation (LayerNorm starts at identity so
+    # pre-trained projector behaviour is preserved at the start of Stage 2).
+    for name, p in projector.named_parameters():
+        p.requires_grad = name.startswith("input_norm")
+    projector.eval()
+
+    print("[stage2] Building ClassificationHead...")
+    cls_head = ClassificationHead(
+        llm_dim=llm.hidden_dim,
+        rag_dim=config.embedder_dim,
+        hidden_dim=config.cls_hidden_dim,
+    )
+    cls_head.to(llm.device)
+    cls_head.train()
 
     print(f"[stage2] Applying LoRA ({', '.join(LORA_TARGET_MODULES)})...")
     llm.model = _apply_lora(llm.model, config)
@@ -275,10 +314,21 @@ def train(
     check_label_distribution(check_samples)
     print("[stage2] Label distribution OK.")
 
-    # Optimizer + cosine scheduler over LoRA params only
+    # Optimizer covers LoRA params + ClassificationHead + projector input_norm.
+    # input_norm uses a lower LR to avoid disrupting pre-trained projector geometry.
     lora_params = [p for p in llm.model.parameters() if p.requires_grad]
-    print(f"[stage2] Trainable LoRA params: {sum(p.numel() for p in lora_params):,}")
-    optimizer = AdamW(lora_params, lr=lr, weight_decay=0.01)
+    input_norm_params = [p for p in projector.parameters() if p.requires_grad]
+    print(f"[stage2] Trainable LoRA params:       {sum(p.numel() for p in lora_params):,}")
+    print(f"[stage2] Trainable input_norm params:  {sum(p.numel() for p in input_norm_params):,}")
+    print(f"[stage2] Trainable cls_head params:    {sum(p.numel() for p in cls_head.parameters()):,}")
+    optimizer = AdamW(
+        [
+            {"params": lora_params,                        "lr": lr},
+            {"params": list(cls_head.parameters()),        "lr": lr},
+            {"params": input_norm_params,                  "lr": lr * 0.1},
+        ],
+        weight_decay=0.01,
+    )
 
     total_steps = epochs * max_pairs // max(grad_accum_steps, 1)
     scheduler = get_cosine_schedule_with_warmup(
@@ -301,6 +351,10 @@ def train(
             print(f"[stage2] Resumed from {resume_from}  (step={global_step}, epoch={start_epoch})")
         else:
             print(f"[stage2] WARNING: resume_from given but no train_state.pt found at {resume_from}")
+        # Restore ClassificationHead weights if they exist alongside the LoRA checkpoint
+        if config.cls_head_path.exists():
+            cls_head.load_state_dict(torch.load(config.cls_head_path, map_location="cpu"))
+            print(f"[stage2] ClassificationHead weights restored from {config.cls_head_path}")
 
     log_path = config.logs_dir / "stage2.jsonl"
     log_mode = "a" if resume_from is not None else "w"
@@ -328,10 +382,23 @@ def train(
                 attention_mask=batch.attention_mask,
                 labels=batch.labels,
             )
-            loss = out.loss
-            if loss is None or not torch.isfinite(loss):
-                print(f"[stage2] step {global_step}: non-finite loss, skipping")
+            lm_loss = out.loss
+            if lm_loss is None or not torch.isfinite(lm_loss):
+                print(f"[stage2] step {global_step}: non-finite lm_loss, skipping")
                 continue
+
+            # Classification loss — cross-entropy on binary head logits
+            label_tensor = torch.tensor([batch.label_id], device=llm.device)
+            cls_logits = cls_head(batch.perceiver_out, batch.rag_embeddings)  # (1, 2)
+            cls_loss = F.cross_entropy(cls_logits, label_tensor)
+
+            if not torch.isfinite(cls_loss):
+                print(f"[stage2] step {global_step}: non-finite cls_loss, skipping")
+                continue
+
+            # Multi-task loss: weighted sum of generation and classification objectives
+            alpha = config.cls_alpha
+            loss = alpha * cls_loss + (1.0 - alpha) * lm_loss
 
             scaled_loss = loss / grad_accum_steps
             scaled_loss.backward()
@@ -342,19 +409,20 @@ def train(
                 continue   # accumulate more before updating
 
             # ── Parameter update ──────────────────────────────────────────────
+            all_trainable = lora_params + list(cls_head.parameters()) + input_norm_params
             if not first_step_grad_checked:
                 total_g = sum(
                     p.grad.detach().abs().sum().item()
-                    for p in lora_params if p.grad is not None
+                    for p in all_trainable if p.grad is not None
                 )
                 if total_g == 0.0:
                     raise RuntimeError(
-                        "LoRA received zero gradient on step 1 — check target_modules."
+                        "Zero gradient on step 1 — check LoRA target_modules and cls_head."
                     )
-                print(f"[stage2] LoRA gradient flow OK (sum|grad|={total_g:.4g})")
+                print(f"[stage2] Gradient flow OK (sum|grad|={total_g:.4g})")
                 first_step_grad_checked = True
 
-            torch.nn.utils.clip_grad_norm_(lora_params, max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(all_trainable, max_norm=1.0)
             optimizer.step()
             scheduler.step()
             optimizer.zero_grad(set_to_none=True)
@@ -387,7 +455,10 @@ def train(
             # ── Mid-training checkpoint ───────────────────────────────────────
             if save_every > 0 and global_step % save_every == 0:
                 ckpt_dir = lora_save_dir.parent / f"lora_step{global_step}"
-                _save_checkpoint_s2(ckpt_dir, llm.model, optimizer, scheduler, global_step, epoch)
+                _save_checkpoint_s2(
+                    ckpt_dir, llm.model, cls_head, config.cls_head_path,
+                    optimizer, scheduler, global_step, epoch,
+                )
 
     # Write final log row even if global_step never hit log_every (short runs)
     if global_step > 0:
@@ -404,10 +475,12 @@ def train(
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # Final save — LoRA adapter only (SRS §15: checkpoint separation)
+    # Final save — LoRA adapter + ClassificationHead (SRS §15: checkpoint separation)
     lora_save_dir.mkdir(parents=True, exist_ok=True)
     llm.model.save_pretrained(str(lora_save_dir))
+    torch.save(cls_head.state_dict(), config.cls_head_path)
     print(f"[stage2] Final LoRA adapter saved → {lora_save_dir}")
+    print(f"[stage2] ClassificationHead saved → {config.cls_head_path}")
     print(f"[stage2] Projector NOT re-saved here — load from {projector_path} for inference.")
 
 

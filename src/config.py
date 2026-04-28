@@ -85,19 +85,28 @@ class Config:
     mimic_image_columns: tuple[str, ...] = ("image", "jpg", "dicom")
 
     # --- Classification threshold ---
-    # Derived via Youden J statistic (J = TPR - FPR, argmax over ROC curve)
-    # on 200-sample MIMIC-CXR eval with image-conditioned retrieval (caption pass).
-    # Optimal J=0.3400 at threshold=0.3486, TPR=0.648, FPR=0.308.
-    # Updated from 0.1824 after fixing p_abn extraction to scan label-token position
-    # rather than first generated token (which was start of CoT reasoning chain).
+    # Starting point for the ClassificationHead softmax output (proper binary
+    # probability in [0,1], balanced training). 0.5 is the natural midpoint for
+    # a balanced classifier — recalibrate via Youden J on the Exp 1 ROC curve
+    # after training and update MEDDIAG_THRESHOLD accordingly.
+    # Previous value (0.3486) was for the old LLaMA logit-heuristic and is invalid here.
     classification_threshold: float = field(
         default_factory=lambda: float(
-            os.environ.get("MEDDIAG_THRESHOLD", "0.3486")
+            os.environ.get("MEDDIAG_THRESHOLD", "0.5")
         )
     )
 
+    # --- Classification head ---
+    # Weight balancing classification loss vs LM generation loss in Stage 2.
+    # total_loss = cls_alpha * cls_loss + (1 - cls_alpha) * lm_loss
+    cls_alpha: float = field(
+        default_factory=lambda: float(os.environ.get("MEDDIAG_CLS_ALPHA", "0.5"))
+    )
+    # Dimension of the hidden layer in the classification MLP.
+    cls_hidden_dim: int = 512
+
     # --- Inference ---
-    max_new_tokens: int = 384
+    max_new_tokens: int = 512
     # Greedy by default to make diagnosis reproducible. SRS §17 flags greedy as an
     # open question; switch to sampling in evaluation configs, not here.
     do_sample: bool = False
@@ -115,6 +124,10 @@ class Config:
     logs_dir: Path = PROJECT_ROOT / "logs"
     models_dir: Path = PROJECT_ROOT / "models"
     diagnostics_dir: Path = PROJECT_ROOT / "diagnostics"
+
+    @property
+    def cls_head_path(self) -> Path:
+        return self.models_dir / "cls_head.pt"
 
     def validate(self, require_token: bool = True) -> None:
         """Fail fast on missing critical config.

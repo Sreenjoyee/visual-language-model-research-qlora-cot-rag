@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator, Sequence
 
@@ -45,6 +45,10 @@ class RetrievedSnippet:
     text: str
     source: str
     distance: float
+    # Raw embedding reconstructed from the FAISS index — used by ClassificationHead.
+    # None when the index doesn't support reconstruction (shouldn't happen with
+    # IndexFlatL2, but guarded so old code paths don't break).
+    embedding: np.ndarray | None = field(default=None, repr=False)
 
 
 class KnowledgeSource(ABC):
@@ -207,6 +211,108 @@ class RadiopaediaSource(KnowledgeSource):
 
             time.sleep(0.34)  # NCBI rate limit: stay under 3 req/s
 
+
+class EuropePMCSource(KnowledgeSource):
+    """Radiology abstracts from Europe PMC REST API.
+
+    Drop-in alternative to RadiopaediaSource (NCBI E-utilities). Same radiology
+    queries, different endpoint — free, no authentication, and accessible from
+    networks that block or throttle NCBI. Rate limit is generous (~10 req/s).
+    """
+
+    name = "europepmc-radiology"
+
+    _QUERIES: list[str] = [
+        "chest radiograph findings interpretation pathology",
+        "chest X-ray pneumonia consolidation opacity diagnosis",
+        "pleural effusion chest radiograph imaging features",
+        "pneumothorax chest X-ray radiographic signs",
+        "pulmonary edema chest radiograph appearance",
+        "atelectasis lung collapse chest radiograph",
+        "cardiomegaly cardiac silhouette chest X-ray",
+        "pulmonary nodule mass chest radiograph evaluation",
+        "interstitial lung disease chest radiograph patterns",
+    ]
+    _BASE = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+
+    def __init__(self, max_snippets: int = 300, per_query: int = 40):
+        self.max_snippets = max_snippets
+        self.per_query = per_query
+
+    def iter_snippets(self) -> Iterator[tuple[str, str]]:
+        yielded = 0
+        for query in self._QUERIES:
+            if yielded >= self.max_snippets:
+                break
+            url = (
+                f"{self._BASE}"
+                f"?query={urllib.parse.quote(query)}"
+                f"&resultType=core&format=json"
+                f"&pageSize={self.per_query}"
+            )
+            try:
+                data = json.loads(_http_get(url, timeout=15))
+                results = data.get("resultList", {}).get("result", [])
+            except Exception as e:
+                print(f"[EuropePMCSource] search failed for '{query[:40]}': {e}")
+                continue
+            for article in results:
+                if yielded >= self.max_snippets:
+                    break
+                abstract = article.get("abstractText", "").strip()
+                if not abstract or len(abstract) < 80:
+                    continue
+                yield abstract, self.name
+                yielded += 1
+            time.sleep(0.15)
+
+
+class HFPubMedQASource(KnowledgeSource):
+    """Radiology-filtered QA contexts from the PubMedQA dataset (HuggingFace).
+
+    qiaojin/PubMedQA is public and streams through HuggingFace — no external
+    API call needed. Each example contains a research question and supporting
+    abstract sentences; we concatenate the context sentences and keep only
+    chest/radiology-relevant ones.
+    """
+
+    name = "pubmedqa-radiology"
+
+    _KEYWORDS = frozenset({
+        "chest", "radiograph", "x-ray", "pulmonary", "lung", "pleural",
+        "pneumonia", "consolidation", "effusion", "opacity", "atelectasis",
+        "pneumothorax", "cardiomegaly", "mediastinum", "thorax", "thoracic",
+        "bronchial", "tracheal", "diaphragm", "costophrenic",
+    })
+
+    def __init__(self, max_snippets: int = 300):
+        self.max_snippets = max_snippets
+
+    def iter_snippets(self) -> Iterator[tuple[str, str]]:
+        from datasets import load_dataset
+        try:
+            ds = load_dataset(
+                "qiaojin/PubMedQA", "pqa_labeled", split="train", streaming=True
+            )
+        except Exception as e:
+            print(f"[HFPubMedQASource] Could not load PubMedQA: {e}")
+            return
+
+        yielded = 0
+        for example in ds:
+            if yielded >= self.max_snippets:
+                break
+            question = str(example.get("question", "")).lower()
+            if not any(kw in question for kw in self._KEYWORDS):
+                continue
+            contexts = example.get("context", {}).get("contexts", [])
+            if not contexts:
+                continue
+            text = " ".join(str(c) for c in contexts if c).strip()
+            if len(text) < 80:
+                continue
+            yield text, self.name
+            yielded += 1
 
 
 class MedPixSource(KnowledgeSource):
@@ -560,5 +666,19 @@ class Retriever:
             if idx < 0 or idx >= len(self.meta):
                 continue
             row = self.meta[idx]
-            out.append(RetrievedSnippet(text=row["text"], source=row["source"], distance=float(dist)))
+            # Reconstruct the stored embedding so ClassificationHead can use it
+            # directly without re-encoding. IndexFlatL2 supports reconstruct().
+            try:
+                embedding = self.index.reconstruct(int(idx))
+            except AttributeError:
+                embedding = None  # index type doesn't support reconstruct
+            except Exception as e:
+                print(f"[retriever] reconstruct({idx}) failed: {type(e).__name__}: {e}")
+                embedding = None
+            out.append(RetrievedSnippet(
+                text=row["text"],
+                source=row["source"],
+                distance=float(dist),
+                embedding=embedding,
+            ))
         return out

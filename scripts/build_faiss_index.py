@@ -20,7 +20,15 @@ import sys
 from pathlib import Path
 
 from src.config import CONFIG
-from src.retrieval import GuidelinesSource, MedPixSource, MimicReportsSource, RadiopaediaSource, Retriever
+from src.retrieval import (
+    EuropePMCSource,
+    GuidelinesSource,
+    HFPubMedQASource,
+    MedPixSource,
+    MimicReportsSource,
+    RadiopaediaSource,
+    Retriever,
+)
 
 
 def main() -> int:
@@ -69,17 +77,26 @@ def main() -> int:
     else:
         print("[build_faiss] Source 1: MIMIC-CXR SKIPPED")
 
-    # Source 2: PubMed radiology abstracts (public, no auth)
+    # Source 2: PubMed via NCBI E-utilities (may fail on restricted networks)
     sources.append(RadiopaediaSource(max_snippets=args.max_pubmed))
-    print(f"[build_faiss] Source 2: PubMed radiology (max {args.max_pubmed} snippets)")
+    print(f"[build_faiss] Source 2: PubMed/NCBI radiology (max {args.max_pubmed} snippets)")
 
-    # Source 3: IU-Xray clinical cases (public HuggingFace dataset)
+    # Source 3: PubMed via Europe PMC REST API (fallback — different endpoint,
+    # no auth, accessible when NCBI is blocked or unreachable)
+    sources.append(EuropePMCSource(max_snippets=args.max_pubmed))
+    print(f"[build_faiss] Source 3: PubMed/EuropePMC radiology (max {args.max_pubmed} snippets)")
+
+    # Source 4: PubMedQA radiology contexts via HuggingFace (no external API)
+    sources.append(HFPubMedQASource(max_snippets=args.max_pubmed))
+    print(f"[build_faiss] Source 4: PubMedQA/HuggingFace radiology (max {args.max_pubmed} snippets)")
+
+    # Source 5: IU-Xray clinical cases (public HuggingFace dataset)
     sources.append(MedPixSource(max_snippets=args.max_iuxray))
-    print(f"[build_faiss] Source 3: IU-Xray/MedPix (max {args.max_iuxray} snippets)")
+    print(f"[build_faiss] Source 5: IU-Xray/MedPix (max {args.max_iuxray} snippets)")
 
-    # Source 4: Static ACR/RSNA/WHO guidelines (always included, 22 snippets)
+    # Source 6: Static ACR/RSNA/WHO guidelines (always included, no network needed)
     sources.append(GuidelinesSource())
-    print("[build_faiss] Source 4: ACR/RSNA/WHO guidelines (22 static snippets)")
+    print("[build_faiss] Source 6: ACR/RSNA/WHO guidelines (22 static snippets)")
 
     retriever = Retriever(CONFIG)
     out_dir = args.out_dir or CONFIG.faiss_index_dir
