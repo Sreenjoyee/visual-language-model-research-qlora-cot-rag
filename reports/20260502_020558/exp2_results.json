@@ -1,0 +1,25 @@
+{
+  "experiment": 2,
+  "dataset": "MIMIC-CXR",
+  "n_samples": 100,
+  "rag": {
+    "chair_score": {
+      "mean": 0.8952,
+      "std": 0.1042
+    },
+    "bertscore_f1": {
+      "mean": 0.6837,
+      "std": 0.0365
+    }
+  },
+  "no_rag": {
+    "chair_score": {
+      "mean": 0.9739,
+      "std": 0.0402
+    },
+    "bertscore_f1": {
+      "mean": 0.7214,
+      "std": 0.0267
+    }
+  }
+}

@@ -187,7 +187,7 @@ else
     MAX_PAIRS_S2=4000
     WARMUP_S1=200
     WARMUP_S2=150
-    SAVE_EVERY=500
+    SAVE_EVERY=100
     EVAL_SAMPLES=200
     ROBUSTNESS_SAMPLES=50
     GRAD_ACCUM=8  # RTX 3050 4GB: keeps per-step activation memory low

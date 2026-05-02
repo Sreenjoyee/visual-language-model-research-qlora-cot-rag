@@ -92,7 +92,7 @@ class Config:
     # Previous value (0.3486) was for the old LLaMA logit-heuristic and is invalid here.
     classification_threshold: float = field(
         default_factory=lambda: float(
-            os.environ.get("MEDDIAG_THRESHOLD", "0.5")
+            os.environ.get("MEDDIAG_THRESHOLD", "0.0009")
         )
     )
 
