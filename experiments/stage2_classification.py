@@ -379,6 +379,8 @@ def train(
     t_start = time.time()
     first_step_grad_checked = False
     accum_loss = 0.0
+    accum_cls_loss = 0.0
+    accum_lm_loss = 0.0
     micro_step = 0
     adv_rng = random.Random(42)  # seeded for reproducibility
 
@@ -447,6 +449,8 @@ def train(
             scaled_loss = loss / grad_accum_steps
             scaled_loss.backward()
             accum_loss += loss.item()
+            accum_cls_loss += cls_loss.item()
+            accum_lm_loss += lm_loss.item()
             micro_step += 1
 
             if micro_step % grad_accum_steps != 0:
@@ -472,7 +476,11 @@ def train(
             optimizer.zero_grad(set_to_none=True)
 
             avg_loss = accum_loss / grad_accum_steps
+            avg_cls_loss = accum_cls_loss / grad_accum_steps
+            avg_lm_loss = accum_lm_loss / grad_accum_steps
             accum_loss = 0.0
+            accum_cls_loss = 0.0
+            accum_lm_loss = 0.0
             global_step += 1
 
             if global_step % log_every == 0:
@@ -481,17 +489,33 @@ def train(
                     if llm.device.type == "cuda" else 0.0
                 )
                 current_lr = scheduler.get_last_lr()[0]
+                elapsed = time.time() - t_start
+                secs_per_step = elapsed / max(global_step, 1)
+                steps_left = total_steps - global_step
+                eta_s = secs_per_step * steps_left
+                eta_h = eta_s / 3600
+
                 row = {
                     "step": global_step, "epoch": epoch,
                     "loss": round(avg_loss, 4),
+                    "cls_loss": round(avg_cls_loss, 4),
+                    "lm_loss": round(avg_lm_loss, 4),
                     "lr": round(current_lr, 8),
                     "label": pair.label,
                     "vram_gb": round(vram_gb, 2),
-                    "elapsed_s": round(time.time() - t_start, 1),
+                    "elapsed_s": round(elapsed, 1),
+                    "secs_per_step": round(secs_per_step, 1),
+                    "eta_h": round(eta_h, 2),
                 }
                 print(
-                    f"[stage2] step {global_step:5d} | loss {row['loss']:.4f} "
-                    f"| lr {current_lr:.2e} | label {pair.label:<8} | vram {row['vram_gb']:.2f}GB"
+                    f"[stage2] step {global_step:5d}/{total_steps} "
+                    f"| epoch {epoch + 1}/{epochs} "
+                    f"| loss {avg_loss:.4f} (cls={avg_cls_loss:.4f} lm={avg_lm_loss:.4f}) "
+                    f"| lr {current_lr:.2e} "
+                    f"| {pair.label:<8} "
+                    f"| vram {vram_gb:.2f}GB "
+                    f"| {secs_per_step:.0f}s/step "
+                    f"| ETA {eta_h:.1f}h"
                 )
                 log_f.write(json.dumps(row) + "\n")
                 log_f.flush()
