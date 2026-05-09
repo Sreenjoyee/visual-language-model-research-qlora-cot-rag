@@ -480,6 +480,114 @@ def plot_rag_ablation(
     return fig
 
 
+# ── Exp 8: Energy comparison bar chart ────────────────────────────────────────
+
+def plot_energy_comparison(
+    meddiag_kwh: float,
+    gpt4v_kwh: float,
+    n_samples: int,
+    efficiency_ratio: float,
+) -> plt.Figure:
+    """Side-by-side bar chart comparing MEDDIAG vs GPT-4V energy per inference.
+
+    Args:
+        meddiag_kwh:      Energy per inference for MEDDIAG (kWh).
+        gpt4v_kwh:        Energy per inference for GPT-4V (kWh).
+        n_samples:        Number of inferences evaluated.
+        efficiency_ratio: How many times more efficient MEDDIAG is vs GPT-4V.
+    """
+    fig, ax = _new_fig(6.0, 5.0)
+
+    systems = ["MEDDIAG\n(Local GPU)", "GPT-4V\n(Cloud)"]
+    values  = [meddiag_kwh * 1e6, gpt4v_kwh * 1e6]  # convert to micro-kWh for readability
+    colors  = [_PAL["normal"], _PAL["abnormal"]]
+
+    bars = ax.bar(systems, values, width=0.4, color=colors, alpha=0.85, edgecolor="white", linewidth=1.2)
+
+    for bar, val in zip(bars, values):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() * 1.03,
+            f"{val:.2f} µkWh",
+            ha="center", va="bottom", fontsize=10, fontweight="bold",
+        )
+
+    ax.set_ylabel("Energy per inference (µkWh)")
+    ax.set_title(
+        f"Exp 8 — Energy Efficiency: MEDDIAG vs GPT-4V\n"
+        f"MEDDIAG is {efficiency_ratio:.1f}× more efficient  (n={n_samples} inferences)"
+    )
+    ax.set_ylim(0, max(values) * 1.25)
+
+    patch_med = mpatches.Patch(color=_PAL["normal"],   label=f"MEDDIAG — {meddiag_kwh:.2e} kWh/inf")
+    patch_gpt = mpatches.Patch(color=_PAL["abnormal"], label=f"GPT-4V  — {gpt4v_kwh:.2e} kWh/inf")
+    ax.legend(handles=[patch_med, patch_gpt], loc="upper right", fontsize=9)
+
+    return _finish(fig)
+
+
+# ── Exp 9: Component ablation bar chart ───────────────────────────────────────
+
+def plot_component_ablation(
+    ablation_results: dict[str, dict],
+) -> plt.Figure:
+    """Horizontal bar chart showing AUROC for each ablation configuration.
+
+    Args:
+        ablation_results: {config_key: {"auroc": float, "description": str}}
+    """
+    configs   = [(v["description"], v["auroc"]) for v in ablation_results.values()
+                 if v.get("auroc") is not None]
+    labels    = [c[0] for c in configs]
+    aurocs    = [c[1] for c in configs]
+
+    if not configs:
+        fig, ax = _new_fig()
+        ax.text(0.5, 0.5, "No ablation data", ha="center", va="center", transform=ax.transAxes)
+        return _finish(fig)
+
+    full_auroc = aurocs[0]  # first entry is always full system
+    colors = [
+        _PAL["normal"] if i == 0 else (
+            _PAL["vram"] if a >= full_auroc else _PAL["abnormal"]
+        )
+        for i, a in enumerate(aurocs)
+    ]
+
+    fig, ax = _new_fig(9.0, max(4.0, len(configs) * 0.9 + 1.5))
+    y_pos = np.arange(len(configs))
+
+    bars = ax.barh(y_pos, aurocs, height=0.55, color=colors, alpha=0.85,
+                   edgecolor="white", linewidth=1.0)
+
+    for bar, auroc, i in zip(bars, aurocs, range(len(aurocs))):
+        delta = auroc - full_auroc
+        delta_str = f"({'+' if delta >= 0 else ''}{delta:.4f})" if i > 0 else "(baseline)"
+        ax.text(
+            bar.get_width() + 0.002,
+            bar.get_y() + bar.get_height() / 2,
+            f"{auroc:.4f}  {delta_str}",
+            va="center", fontsize=9,
+        )
+
+    # Vertical line at full system AUROC
+    ax.axvline(full_auroc, color=_PAL["neutral"], linewidth=1.2, linestyle="--", alpha=0.7)
+
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(labels, fontsize=9)
+    ax.invert_yaxis()
+    ax.set_xlabel("AUROC")
+    ax.set_xlim(0, min(1.0, max(aurocs) + 0.12))
+    ax.set_title("Exp 9 — Component Ablation: AUROC by System Configuration")
+
+    patch_full = mpatches.Patch(color=_PAL["normal"],   label="Full system (baseline)")
+    patch_up   = mpatches.Patch(color=_PAL["vram"],     label="No degradation vs baseline")
+    patch_down = mpatches.Patch(color=_PAL["abnormal"], label="Degraded vs baseline")
+    ax.legend(handles=[patch_full, patch_up, patch_down], loc="lower right", fontsize=8)
+
+    return _finish(fig)
+
+
 # ── Save utility ───────────────────────────────────────────────────────────────
 
 def save_figure(fig: plt.Figure, path: Path | str, fmt: str = "png") -> Path:

@@ -59,7 +59,9 @@ from src.output_parser import parse_output
 from src.pipeline import MeddiagPipeline
 from src.plotting import (
     plot_calibration_curve,
+    plot_component_ablation,
     plot_confusion_matrix,
+    plot_energy_comparison,
     plot_evidence_histogram,
     plot_green_bar,
     plot_latency_distribution,
@@ -640,6 +642,11 @@ def exp8_energy(
         "efficiency_ratio_vs_gpt4v": efficiency_ratio,
     }
     _save_json(result, output_dir / "exp8_results.json")
+    save_figure(
+        plot_energy_comparison(energy_per_inf, gpt4v_estimate / len(results),
+                               len(results), efficiency_ratio),
+        output_dir / "exp8_energy_comparison",
+    )
     print(f"  Energy/inference:  {energy_per_inf:.2e} kWh")
     print(f"  GPT-4V equivalent: {gpt4v_estimate:.4f} kWh for {len(results)} requests")
     print(f"  MEDDIAG is ~{efficiency_ratio}x more energy-efficient than GPT-4V cloud")
@@ -846,6 +853,10 @@ def exp9_component_ablation(
         "ablations": ablation_results,
     }
     _save_json(result, output_dir / "exp9_results.json")
+    save_figure(
+        plot_component_ablation(ablation_results),
+        output_dir / "exp9_component_ablation",
+    )
     return result
 
 
