@@ -48,6 +48,7 @@ from transformers import get_cosine_schedule_with_warmup
 from src.classification_head import ClassificationHead
 from src.config import CONFIG, Config
 from src.data.balanced_stream import LabeledPair, balanced_mimic_stream, check_label_distribution
+from src.data.iu_xray_stream import iu_xray_abnormal_training_stream, iu_xray_normal_training_stream
 from src.llm import LoadedLLM, load_llm
 from src.projector import PerceiverResampler
 from src.prompts import IMAGE_PLACEHOLDER, build_chat_messages, build_classification_target
@@ -111,7 +112,7 @@ def _encode_example(
     llm: LoadedLLM,
     retriever: Retriever,
     config: Config,
-    max_target_tokens: int = 256,
+    max_target_tokens: int = 600,
     step_idx: int = 0,
 ) -> BatchTensors:
     """Encode one labeled pair into training tensors.
@@ -125,9 +126,10 @@ def _encode_example(
     device = llm.device
     tokenizer = llm.tokenizer
 
-    # 1. FAISS retrieval — use actual report text as query during training.
-    # At inference the model generates its own caption; report is unavailable.
-    retrieved = retriever.query(pair.report[:300], k=config.retrieval_top_k)
+    # 1. FAISS retrieval — use first sentence of report as query to better match
+    # the caption-style queries used at inference, reducing train/inference mismatch.
+    first_sentence = pair.report.split(".")[0].strip()[:150]
+    retrieved = retriever.query(first_sentence, k=config.retrieval_top_k)
     snippets = [r.text for r in retrieved]
 
     # Stack RAG embeddings for ClassificationHead — fall back to zeros if any
@@ -366,11 +368,35 @@ def train(
     accum_loss = 0.0
     micro_step = 0
 
+    # Pre-load IU-Xray samples once — reused across epochs.
+    print("[stage2] Pre-loading IU-Xray NORMAL training samples...")
+    iu_xray_normals: list[LabeledPair] = list(iu_xray_normal_training_stream(max_samples=2000))
+    print(f"[stage2] IU-Xray NORMAL samples loaded: {len(iu_xray_normals)}")
+
+    print("[stage2] Pre-loading IU-Xray ABNORMAL training samples...")
+    iu_xray_abnormals: list[LabeledPair] = list(iu_xray_abnormal_training_stream(max_samples=500))
+    print(f"[stage2] IU-Xray ABNORMAL samples loaded: {len(iu_xray_abnormals)}")
+
     for epoch in range(start_epoch, epochs):
         print(f"[stage2] === Epoch {epoch + 1}/{epochs} ===")
         optimizer.zero_grad(set_to_none=True)
 
-        stream = balanced_mimic_stream(config, split="train", max_pairs=max_pairs)
+        # Interleave MIMIC stream with IU-Xray NORMAL and ABNORMAL samples.
+        # Pattern: MIMIC, IU-Normal, MIMIC, IU-Abnormal — keeps 1:1 overall balance
+        # while adding institutional diversity to both classes.
+        mimic_stream = balanced_mimic_stream(config, split="train", max_pairs=max_pairs)
+        iu_normal_cycle = itertools.cycle(iu_xray_normals) if iu_xray_normals else None
+        iu_abnormal_cycle = itertools.cycle(iu_xray_abnormals) if iu_xray_abnormals else None
+
+        def _interleaved(mimic, normal_cycle, abnormal_cycle):
+            for mimic_pair in mimic:
+                yield mimic_pair
+                if normal_cycle is not None:
+                    yield next(normal_cycle)
+                if abnormal_cycle is not None:
+                    yield next(abnormal_cycle)
+
+        stream = _interleaved(mimic_stream, iu_normal_cycle, iu_abnormal_cycle)
         for pair in stream:
             try:
                 batch = _encode_example(pair, vision, projector, llm, retriever, config, step_idx=global_step)

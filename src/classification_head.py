@@ -52,6 +52,7 @@ class ClassificationHead(nn.Module):
             nn.Linear(llm_dim * 2, hidden_dim),
             nn.GELU(),
             nn.LayerNorm(hidden_dim),
+            nn.Dropout(0.1),
             nn.Linear(hidden_dim, 2),
         )
 

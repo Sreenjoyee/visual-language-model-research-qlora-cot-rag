@@ -63,7 +63,7 @@ class Config:
         )
     )
     embedder_dim: int = 384              # MiniLM-L6-v2
-    retrieval_top_k: int = 3
+    retrieval_top_k: int = 5
 
     # --- MIMIC-CXR dataset ---
     # Default: itsanmolgupta/mimic-cxr-dataset — a public mirror of MIMIC-CXR
@@ -100,7 +100,7 @@ class Config:
     # Weight balancing classification loss vs LM generation loss in Stage 2.
     # total_loss = cls_alpha * cls_loss + (1 - cls_alpha) * lm_loss
     cls_alpha: float = field(
-        default_factory=lambda: float(os.environ.get("MEDDIAG_CLS_ALPHA", "0.5"))
+        default_factory=lambda: float(os.environ.get("MEDDIAG_CLS_ALPHA", "0.65"))
     )
     # Dimension of the hidden layer in the classification MLP.
     cls_hidden_dim: int = 512
