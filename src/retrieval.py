@@ -173,14 +173,26 @@ class RadiopaediaSource(KnowledgeSource):
                 f"&fields=abstract"
                 f"&limit={self.per_query}"
             )
-            try:
-                data = json.loads(_http_get(url, timeout=15))
-                papers = data.get("data", [])
-            except Exception as e:
-                print(f"[RadiopaediaSource] Semantic Scholar failed '{query[:40]}': {e}")
+            # Retry with exponential backoff on 429 rate limit
+            delay = 5.0
+            data = None
+            for attempt in range(4):
+                try:
+                    data = json.loads(_http_get(url, timeout=15))
+                    break
+                except Exception as e:
+                    if "429" in str(e) and attempt < 3:
+                        print(f"[RadiopaediaSource] rate limited, waiting {delay:.0f}s...")
+                        time.sleep(delay)
+                        delay *= 2
+                    else:
+                        print(f"[RadiopaediaSource] Semantic Scholar failed '{query[:40]}': {e}")
+                        break
+
+            if data is None:
                 continue
 
-            for paper in papers:
+            for paper in data.get("data", []):
                 if yielded >= self.max_snippets:
                     break
                 abstract = (paper.get("abstract") or "").strip()
@@ -189,7 +201,7 @@ class RadiopaediaSource(KnowledgeSource):
                 yield abstract, self.name
                 yielded += 1
 
-            time.sleep(1.0)  # Semantic Scholar: ~1 req/s without API key
+            time.sleep(3.0)  # conservative delay between queries
 
 
 class EuropePMCSource(KnowledgeSource):
