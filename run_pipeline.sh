@@ -187,7 +187,8 @@ else
     MAX_PAIRS_S2=4000
     WARMUP_S1=200
     WARMUP_S2=150
-    SAVE_EVERY=100
+    SAVE_EVERY_S1=500   # Stage 1: 2.6GB per checkpoint — every 500 steps = 5 checkpoints max
+    SAVE_EVERY_S2=250   # Stage 2: ~100MB per checkpoint — every 250 steps to reduce storage
     EVAL_SAMPLES=200
     ROBUSTNESS_SAMPLES=50
     GRAD_ACCUM=8  # RTX 3050 4GB: keeps per-step activation memory low
@@ -267,7 +268,7 @@ else
         --lr               1e-4 \
         --warmup-steps     "$WARMUP_S1" \
         --grad-accum-steps "$GRAD_ACCUM" \
-        --save-every       "$SAVE_EVERY" \
+        --save-every       "${SAVE_EVERY_S1:-500}" \
         --log-every        25 \
         --save-path        "$PROJECTOR_PATH" \
         $RESUME_S1
@@ -305,7 +306,7 @@ else
         --lr               2e-4 \
         --warmup-steps     "$WARMUP_S2" \
         --grad-accum-steps "$GRAD_ACCUM" \
-        --save-every       "$SAVE_EVERY" \
+        --save-every       "${SAVE_EVERY_S2:-100}" \
         --log-every        25 \
         --lora-save-dir    "$LORA_DIR" \
         $RESUME_S2
