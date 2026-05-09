@@ -386,6 +386,78 @@ class MedPixSource(KnowledgeSource):
             yielded += 1
 
 
+class RadiopaediaArticleSource(KnowledgeSource):
+    """Real Radiopaedia.org article content for chest X-ray findings.
+
+    Fetches a curated list of Radiopaedia articles covering the key chest
+    X-ray findings relevant to NORMAL/ABNORMAL classification. Each article
+    is split into paragraph-level snippets for fine-grained retrieval.
+
+    Respects rate limits (1 req/3s). Fails silently per article so a single
+    blocked page doesn't abort the index build.
+    """
+
+    name = "radiopaedia"
+
+    _ARTICLES: list[tuple[str, str]] = [
+        ("normal-chest-radiograph",          "Normal chest radiograph"),
+        ("chest-radiograph",                  "Chest radiograph approach"),
+        ("consolidation-lungs",               "Lung consolidation"),
+        ("pneumonia",                         "Pneumonia"),
+        ("pleural-effusion",                  "Pleural effusion"),
+        ("pneumothorax",                      "Pneumothorax"),
+        ("pulmonary-oedema",                  "Pulmonary oedema"),
+        ("cardiomegaly",                      "Cardiomegaly"),
+        ("cardiothoracic-ratio",              "Cardiothoracic ratio"),
+        ("atelectasis",                       "Atelectasis"),
+        ("air-space-opacity",                 "Airspace opacity"),
+        ("interstitial-lung-disease",         "Interstitial lung disease"),
+        ("pulmonary-nodule",                  "Pulmonary nodule"),
+        ("ground-glass-opacity",              "Ground glass opacity"),
+        ("pulmonary-fibrosis",                "Pulmonary fibrosis"),
+        ("silhouette-sign-chest",             "Silhouette sign"),
+        ("kerley-lines",                      "Kerley lines"),
+        ("air-bronchogram",                   "Air bronchogram"),
+        ("costophrenic-angle",                "Costophrenic angle"),
+        ("mediastinal-widening",              "Mediastinal widening"),
+    ]
+
+    _BASE = "https://radiopaedia.org/articles/"
+    _HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (compatible; MedDiagResearch/1.0; "
+            "+https://github.com/Sreenjoyee/visual-language-model-research-qlora-cot-rag)"
+        ),
+        "Accept": "text/html",
+    }
+    _MIN_LEN = 80
+
+    def _fetch_article(self, slug: str) -> list[str]:
+        """Fetch one Radiopaedia article and return cleaned paragraph snippets."""
+        import re
+        url = f"{self._BASE}{slug}"
+        req = urllib.request.Request(url, headers=self._HEADERS)
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                html = resp.read().decode("utf-8", errors="ignore")
+        except Exception as e:
+            print(f"[RadiopaediaArticleSource] skip {slug}: {e}")
+            return []
+
+        # Strip tags, collapse whitespace, split on double-newlines
+        text = re.sub(r"<[^>]+>", " ", html)
+        text = re.sub(r"[ \t]+", " ", text)
+        paragraphs = [p.strip() for p in re.split(r"\n{2,}", text)]
+        return [p for p in paragraphs if len(p) >= self._MIN_LEN]
+
+    def iter_snippets(self) -> Iterator[tuple[str, str]]:
+        for slug, title in self._ARTICLES:
+            paragraphs = self._fetch_article(slug)
+            for para in paragraphs:
+                yield f"{title}: {para}", self.name
+            time.sleep(3.0)  # be polite — 1 req/3s
+
+
 class GuidelinesSource(KnowledgeSource):
     """Clinical guidelines from ACR, RSNA, and WHO — static curated text.
 

@@ -26,6 +26,7 @@ from src.retrieval import (
     HFPubMedQASource,
     MedPixSource,
     MimicReportsSource,
+    RadiopaediaArticleSource,
     RadiopaediaSource,
     Retriever,
 )
@@ -94,9 +95,13 @@ def main() -> int:
     sources.append(MedPixSource(max_snippets=args.max_iuxray))
     print(f"[build_faiss] Source 5: IU-Xray/MedPix (max {args.max_iuxray} snippets)")
 
-    # Source 6: Static ACR/RSNA/WHO guidelines (always included, no network needed)
+    # Source 6: Real Radiopaedia.org articles for chest X-ray findings
+    sources.append(RadiopaediaArticleSource())
+    print("[build_faiss] Source 6: Radiopaedia.org chest X-ray articles (20 articles)")
+
+    # Source 7: Static ACR/RSNA/WHO guidelines (always included, no network needed)
     sources.append(GuidelinesSource())
-    print("[build_faiss] Source 6: ACR/RSNA/WHO guidelines (22 static snippets)")
+    print("[build_faiss] Source 7: ACR/RSNA/WHO guidelines (22 static snippets)")
 
     retriever = Retriever(CONFIG)
     out_dir = args.out_dir or CONFIG.faiss_index_dir

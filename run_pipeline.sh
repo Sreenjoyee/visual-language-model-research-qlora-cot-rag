@@ -192,6 +192,7 @@ else
     EVAL_SAMPLES=200
     ROBUSTNESS_SAMPLES=50
     GRAD_ACCUM=8  # RTX 3050 4GB: keeps per-step activation memory low
+    MAX_PUBMED=5000
 fi
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -227,7 +228,7 @@ else
         echo "[skip] --skip-train set and FAISS index exists at $FAISS_INDEX_PATH"
     else
         wait_for_network
-        retry_net python -m scripts.build_faiss_index --max-mimic 20000 --max-pubmed 300 --max-iuxray 2000
+        retry_net python -m scripts.build_faiss_index --max-mimic 20000 --max-pubmed "${MAX_PUBMED:-5000}" --max-iuxray 2000
         echo "[ok] FAISS index built"
     fi
     # Verify index files are non-empty — catches power-cut mid-write
