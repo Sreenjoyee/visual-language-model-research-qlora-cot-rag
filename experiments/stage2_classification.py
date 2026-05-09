@@ -50,6 +50,7 @@ from src.classification_head import ClassificationHead
 from src.config import CONFIG, Config
 from src.data.balanced_stream import LabeledPair, balanced_mimic_stream, check_label_distribution
 from src.data.iu_xray_stream import iu_xray_abnormal_training_stream, iu_xray_normal_training_stream
+from src.data.pneumonia_xray_stream import pneumonia_xray_stream
 from src.llm import LoadedLLM, load_llm
 from src.projector import PerceiverResampler
 from src.prompts import (
@@ -167,8 +168,11 @@ def _encode_example(
     left_ids = tokenizer(left_text, add_special_tokens=False, return_tensors="pt").input_ids.to(device)
     right_ids = tokenizer(right_text, add_special_tokens=False, return_tensors="pt").input_ids.to(device)
 
-    # 3. Classification target — training-only, never in inference prompt
-    target_text = build_classification_target(pair.label, idx=step_idx)
+    # 3. Classification target — training-only, never in inference prompt.
+    # Pass report text so step 3 uses real clinical language instead of a template.
+    target_text = build_classification_target(
+        pair.label, idx=step_idx, report_snippet=pair.report
+    )
     target_ids = tokenizer(
         target_text,
         add_special_tokens=False,
@@ -393,6 +397,14 @@ def train(
     iu_xray_abnormals: list[LabeledPair] = list(iu_xray_abnormal_training_stream(max_samples=500))
     print(f"[stage2] IU-Xray ABNORMAL samples loaded: {len(iu_xray_abnormals)}")
 
+    print("[stage2] Pre-loading Chest X-ray NORMAL samples (Kermany dataset)...")
+    pneumonia_normals: list[LabeledPair] = list(pneumonia_xray_stream(label="NORMAL", max_samples=1341))
+    print(f"[stage2] Chest X-ray NORMAL samples loaded: {len(pneumonia_normals)}")
+
+    print("[stage2] Pre-loading Chest X-ray ABNORMAL samples (Kermany dataset)...")
+    pneumonia_abnormals: list[LabeledPair] = list(pneumonia_xray_stream(label="ABNORMAL", max_samples=500))
+    print(f"[stage2] Chest X-ray ABNORMAL samples loaded: {len(pneumonia_abnormals)}")
+
     for epoch in range(start_epoch, epochs):
         print(f"[stage2] === Epoch {epoch + 1}/{epochs} ===")
         optimizer.zero_grad(set_to_none=True)
@@ -401,18 +413,28 @@ def train(
         # Pattern: MIMIC, IU-Normal, MIMIC, IU-Abnormal — keeps 1:1 overall balance
         # while adding institutional diversity to both classes.
         mimic_stream = balanced_mimic_stream(config, split="train", max_pairs=max_pairs)
-        iu_normal_cycle = itertools.cycle(iu_xray_normals) if iu_xray_normals else None
-        iu_abnormal_cycle = itertools.cycle(iu_xray_abnormals) if iu_xray_abnormals else None
+        iu_normal_cycle   = itertools.cycle(iu_xray_normals)    if iu_xray_normals    else None
+        iu_abnormal_cycle = itertools.cycle(iu_xray_abnormals)  if iu_xray_abnormals  else None
+        pn_normal_cycle   = itertools.cycle(pneumonia_normals)   if pneumonia_normals   else None
+        pn_abnormal_cycle = itertools.cycle(pneumonia_abnormals) if pneumonia_abnormals else None
 
-        def _interleaved(mimic, normal_cycle, abnormal_cycle):
+        def _interleaved(mimic, iu_n, iu_a, pn_n, pn_a):
             for mimic_pair in mimic:
                 yield mimic_pair
-                if normal_cycle is not None:
-                    yield next(normal_cycle)
-                if abnormal_cycle is not None:
-                    yield next(abnormal_cycle)
+                if iu_n is not None:
+                    yield next(iu_n)
+                if iu_a is not None:
+                    yield next(iu_a)
+                if pn_n is not None:
+                    yield next(pn_n)
+                if pn_a is not None:
+                    yield next(pn_a)
 
-        stream = _interleaved(mimic_stream, iu_normal_cycle, iu_abnormal_cycle)
+        stream = _interleaved(
+            mimic_stream,
+            iu_normal_cycle, iu_abnormal_cycle,
+            pn_normal_cycle, pn_abnormal_cycle,
+        )
         for pair in stream:
             try:
                 batch = _encode_example(pair, vision, projector, llm, retriever, config, step_idx=global_step, adv_rng=adv_rng)

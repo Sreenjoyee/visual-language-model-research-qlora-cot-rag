@@ -384,17 +384,39 @@ def maybe_inject_adversarial(snippets: list[str], rng: random.Random) -> list[st
     return snippets[:-1] + [adversarial] if snippets else [adversarial]
 
 
-def build_classification_target(label: str, idx: int = 0) -> str:
+def build_classification_target(
+    label: str,
+    idx: int = 0,
+    report_snippet: str = "",
+) -> str:
     """Return a training target string for a given NORMAL/ABNORMAL label.
 
-    idx cycles through the template pool so consecutive training samples
-    see different reasoning chains. Caller passes global_step or sample
-    count as idx.
+    idx cycles through the template pool so consecutive training samples see
+    different reasoning chains. Caller passes global_step or sample count as idx.
+
+    report_snippet: if provided (MIMIC/IU-Xray samples), replaces the generic
+    step 3 evidence support text with actual report text — gives each sample a
+    unique, image-specific reasoning chain grounded in real clinical language.
 
     TRAINING USE ONLY. Never call this at inference.
     """
     if label == "NORMAL":
-        return _NORMAL_TARGETS[idx % len(_NORMAL_TARGETS)]
-    if label == "ABNORMAL":
-        return _ABNORMAL_TARGETS[idx % len(_ABNORMAL_TARGETS)]
-    raise ValueError(f"Unknown label {label!r}. Expected 'NORMAL' or 'ABNORMAL'.")
+        target = _NORMAL_TARGETS[idx % len(_NORMAL_TARGETS)]
+    elif label == "ABNORMAL":
+        target = _ABNORMAL_TARGETS[idx % len(_ABNORMAL_TARGETS)]
+    else:
+        raise ValueError(f"Unknown label {label!r}. Expected 'NORMAL' or 'ABNORMAL'.")
+
+    if report_snippet and len(report_snippet.strip()) > 40:
+        # Replace step 3 with actual report text for sample-specific reasoning
+        snippet = report_snippet.strip()[:200]
+        import re
+        target = re.sub(
+            r"3\. Evidence support:.*?(?=4\.)",
+            f"3. Evidence support: The radiology report states: \"{snippet}\". "
+            f"This aligns with the retrieved clinical evidence and supports the diagnosis.\n",
+            target,
+            flags=re.DOTALL,
+        )
+
+    return target
