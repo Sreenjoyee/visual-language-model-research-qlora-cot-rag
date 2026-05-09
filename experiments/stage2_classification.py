@@ -414,10 +414,13 @@ def train(
                 print(f"[stage2] step {global_step}: non-finite lm_loss, skipping")
                 continue
 
-            # Classification loss — cross-entropy on binary head logits
+            # Classification loss — class-weighted cross-entropy.
+            # NORMAL (index 0) gets 2× weight to counteract model drift toward
+            # ABNORMAL predictions caused by higher ABNORMAL training diversity.
             label_tensor = torch.tensor([batch.label_id], device=llm.device)
             cls_logits = cls_head(batch.perceiver_out, batch.rag_embeddings)  # (1, 2)
-            cls_loss = F.cross_entropy(cls_logits, label_tensor)
+            cls_weight = torch.tensor([2.0, 1.0], device=llm.device)
+            cls_loss = F.cross_entropy(cls_logits, label_tensor, weight=cls_weight)
 
             if not torch.isfinite(cls_loss):
                 print(f"[stage2] step {global_step}: non-finite cls_loss, skipping")
