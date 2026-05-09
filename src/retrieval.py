@@ -194,6 +194,133 @@ class RadiopaediaSource(KnowledgeSource):
             time.sleep(3.0)  # conservative delay between queries
 
 
+class OpenAlexSource(KnowledgeSource):
+    """PubMed abstracts via OpenAlex API.
+
+    OpenAlex is a fully open, no-key-required index of 200M+ scholarly papers.
+    Covers all PubMed content. Rate limit: 100K req/day — effectively unlimited.
+    Abstracts stored as inverted index; reconstructed to plain text here.
+    """
+
+    name = "openalex"
+
+    _QUERIES: list[str] = [
+        "chest radiograph normal findings interpretation",
+        "chest X-ray pneumonia consolidation diagnosis",
+        "pleural effusion chest radiograph features",
+        "pneumothorax chest X-ray diagnosis",
+        "pulmonary edema chest radiograph cardiogenic",
+        "atelectasis chest radiograph lobar collapse",
+        "cardiomegaly cardiothoracic ratio chest X-ray",
+        "interstitial lung disease chest radiograph",
+        "pulmonary nodule chest radiograph malignancy",
+        "chest X-ray abnormal findings classification",
+    ]
+    _BASE = "https://api.openalex.org/works"
+
+    def __init__(self, max_snippets: int = 300, per_query: int = 50):
+        self.max_snippets = max_snippets
+        self.per_query = per_query
+
+    @staticmethod
+    def _reconstruct_abstract(inv_index: dict) -> str:
+        if not inv_index:
+            return ""
+        positions: dict[int, str] = {}
+        for word, pos_list in inv_index.items():
+            for pos in pos_list:
+                positions[pos] = word
+        return " ".join(positions[i] for i in sorted(positions))
+
+    def iter_snippets(self) -> Iterator[tuple[str, str]]:
+        yielded = 0
+        for query in self._QUERIES:
+            if yielded >= self.max_snippets:
+                break
+            url = (
+                f"{self._BASE}"
+                f"?search={urllib.parse.quote(query)}"
+                f"&filter=open_access.is_oa:true"
+                f"&per-page={self.per_query}"
+                f"&select=abstract_inverted_index,title"
+                f"&mailto={CONFIG.pubmed_email}"
+            )
+            try:
+                data = json.loads(_http_get(url, timeout=15))
+            except Exception as e:
+                print(f"[OpenAlexSource] failed '{query[:40]}': {e}")
+                continue
+
+            for work in data.get("results", []):
+                if yielded >= self.max_snippets:
+                    break
+                abstract = self._reconstruct_abstract(
+                    work.get("abstract_inverted_index") or {}
+                )
+                if len(abstract) < 80:
+                    continue
+                yield abstract, self.name
+                yielded += 1
+
+            time.sleep(0.5)
+
+
+class CrossRefSource(KnowledgeSource):
+    """Radiology abstracts via CrossRef REST API.
+
+    CrossRef indexes 140M+ scholarly works. Free, no API key required.
+    Rate limit is generous — polite crawling (1 req/s) is well within limits.
+    """
+
+    name = "crossref"
+
+    _QUERIES: list[str] = [
+        "chest radiograph interpretation normal abnormal",
+        "chest X-ray pneumonia diagnosis radiology",
+        "pleural effusion radiograph clinical features",
+        "pulmonary edema chest X-ray cardiogenic",
+        "atelectasis radiograph diagnosis management",
+    ]
+    _BASE = "https://api.crossref.org/works"
+
+    def __init__(self, max_snippets: int = 200, per_query: int = 50):
+        self.max_snippets = max_snippets
+        self.per_query = per_query
+
+    def iter_snippets(self) -> Iterator[tuple[str, str]]:
+        yielded = 0
+        for query in self._QUERIES:
+            if yielded >= self.max_snippets:
+                break
+            url = (
+                f"{self._BASE}"
+                f"?query={urllib.parse.quote(query)}"
+                f"&rows={self.per_query}"
+                f"&select=abstract"
+                f"&mailto={CONFIG.pubmed_email}"
+            )
+            try:
+                data = json.loads(_http_get(url, timeout=15))
+                items = data.get("message", {}).get("items", [])
+            except Exception as e:
+                print(f"[CrossRefSource] failed '{query[:40]}': {e}")
+                continue
+
+            for item in items:
+                if yielded >= self.max_snippets:
+                    break
+                abstract = (item.get("abstract") or "").strip()
+                # CrossRef wraps abstracts in JATS XML tags — strip them
+                import re
+                abstract = re.sub(r"<[^>]+>", " ", abstract).strip()
+                if len(abstract) < 80:
+                    continue
+                yield abstract, self.name
+                yielded += 1
+
+            time.sleep(1.0)
+
+
 class EuropePMCSource(KnowledgeSource):
     """Radiology abstracts from Europe PMC REST API.
 

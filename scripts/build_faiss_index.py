@@ -21,11 +21,13 @@ from pathlib import Path
 
 from src.config import CONFIG
 from src.retrieval import (
+    CrossRefSource,
     EuropePMCSource,
     GuidelinesSource,
     HFPubMedQASource,
     MedPixSource,
     MimicReportsSource,
+    OpenAlexSource,
     RadiopaediaArticleSource,
     RadiopaediaSource,
     Retriever,
@@ -84,9 +86,17 @@ def main() -> int:
     else:
         print("[build_faiss] Source 1: MIMIC-CXR SKIPPED")
 
-    # Source 2: PubMed abstracts via Semantic Scholar (no NCBI dependency)
+    # Source 2: Semantic Scholar (falls back gracefully if rate-limited)
     sources.append(RadiopaediaSource(max_snippets=args.max_pubmed))
-    print(f"[build_faiss] Source 2: Semantic Scholar PubMed abstracts (max {args.max_pubmed} snippets)")
+    print(f"[build_faiss] Source 2: Semantic Scholar abstracts (max {args.max_pubmed} snippets)")
+
+    # Source 2b: OpenAlex — 200M papers, no key, no rate limit issues
+    sources.append(OpenAlexSource(max_snippets=args.max_pubmed))
+    print(f"[build_faiss] Source 2b: OpenAlex abstracts (max {args.max_pubmed} snippets)")
+
+    # Source 2c: CrossRef — 140M papers, no key required
+    sources.append(CrossRefSource(max_snippets=min(args.max_pubmed, 500)))
+    print(f"[build_faiss] Source 2c: CrossRef abstracts (max {min(args.max_pubmed, 500)} snippets)")
 
     # Source 3: PubMed via Europe PMC REST API (different endpoint — works when NCBI is blocked)
     sources.append(EuropePMCSource(max_snippets=args.max_pubmed))
