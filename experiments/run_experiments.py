@@ -14,6 +14,7 @@ Experiments:
     6   ECE calibration + reliability diagram
     7   RAG k-value ablation (k=1,3,5,10)
     8   Energy estimation (GPU TGP vs cloud GPT-4V)
+    9   End-to-end component ablation (RAG / LoRA / ClassificationHead / CoT)
 """
 from __future__ import annotations
 
@@ -645,6 +646,209 @@ def exp8_energy(
     return result
 
 
+# ── Experiment 9: End-to-End Component Ablation ───────────────────────────────
+
+def exp9_component_ablation(
+    pipeline: MeddiagPipeline,
+    output_dir: Path,
+    max_samples: int = 50,
+) -> dict:
+    """Ablate each system component to measure its individual contribution.
+
+    Tests 5 configurations on MIMIC eval stream:
+      A) Full system  — RAG + LoRA + ClassificationHead + CoT
+      B) No RAG       — empty evidence, ClassificationHead still runs
+      C) No cls_head  — text-parse diagnosis only, no ClassificationHead
+      D) No LoRA      — pipeline loaded without LoRA adapter (base LLM only)
+      E) No CoT       — direct answer prompt, no reasoning chain requested
+    """
+    print("\n[Exp 9] End-to-End Component Ablation")
+
+    from src.prompts import SYSTEM_PROMPT
+    from src.output_parser import parse_output as _parse
+
+    configs = {
+        "full_system":   "Full system (RAG + LoRA + CLS head + CoT)",
+        "no_rag":        "No RAG (empty evidence)",
+        "no_cls_head":   "No ClassificationHead (text-parse only)",
+        "no_lora":       "No LoRA (base LLM, projector only)",
+        "no_cot":        "No CoT (direct answer, no reasoning)",
+    }
+
+    samples = list(mimic_eval_stream(
+        hf_token=pipeline.config.hf_token, max_samples=max_samples
+    ))
+
+    def _auroc_from_results(results: list[ScoredResult]) -> float:
+        if not results:
+            return float("nan")
+        try:
+            y_true, _, y_prob = _scores_to_binary(results)
+            return round(auroc_score(y_true, y_prob), 4)
+        except Exception:
+            return float("nan")
+
+    ablation_results: dict[str, dict] = {}
+
+    # ── A: Full system ────────────────────────────────────────────────────────
+    print("  [A] Full system...")
+    full_results = run_eval_stream(pipeline, iter(samples), max_samples=max_samples)
+    ablation_results["full_system"] = {
+        "auroc": _auroc_from_results(full_results),
+        "n": len(full_results),
+        "description": configs["full_system"],
+    }
+    print(f"      AUROC = {ablation_results['full_system']['auroc']:.4f}")
+
+    # ── B: No RAG ────────────────────────────────────────────────────────────
+    print("  [B] No RAG (empty evidence)...")
+    orig_top_k = pipeline.config.retrieval_top_k
+    pipeline.config.retrieval_top_k = 0  # forces empty retrieval
+
+    @torch.no_grad()
+    def _diagnose_no_rag(pair) -> ScoredResult:
+        import time as _time
+        t0 = _time.time()
+        result = pipeline.diagnose(pair.image)
+        return ScoredResult(
+            true_label=pair.label,
+            pred_label=result.diagnosis,
+            p_abnormal=result.cls_confidence if result.cls_confidence is not None else 0.5,
+            reasoning=result.reasoning,
+            latency_s=_time.time() - t0,
+        )
+
+    no_rag_results = []
+    for pair in tqdm(samples, desc="  [B] No RAG", unit="sample"):
+        try:
+            no_rag_results.append(_diagnose_no_rag(pair))
+        except Exception as e:
+            tqdm.write(f"  skip: {e}")
+
+    pipeline.config.retrieval_top_k = orig_top_k
+    ablation_results["no_rag"] = {
+        "auroc": _auroc_from_results(no_rag_results),
+        "n": len(no_rag_results),
+        "description": configs["no_rag"],
+    }
+    print(f"      AUROC = {ablation_results['no_rag']['auroc']:.4f}")
+
+    # ── C: No ClassificationHead (text-parse only) ────────────────────────────
+    print("  [C] No ClassificationHead (text-parse only)...")
+    orig_cls_head = pipeline.cls_head
+    pipeline.cls_head = None
+
+    text_parse_results = run_eval_stream(pipeline, iter(samples), max_samples=max_samples)
+    pipeline.cls_head = orig_cls_head
+    ablation_results["no_cls_head"] = {
+        "auroc": _auroc_from_results(text_parse_results),
+        "n": len(text_parse_results),
+        "description": configs["no_cls_head"],
+    }
+    print(f"      AUROC = {ablation_results['no_cls_head']['auroc']:.4f}")
+
+    # ── D: No LoRA (base LLM only) ───────────────────────────────────────────
+    print("  [D] No LoRA — skipping inference (LoRA already loaded, cannot unload cleanly)")
+    ablation_results["no_lora"] = {
+        "auroc": None,
+        "n": 0,
+        "description": configs["no_lora"],
+        "note": "Requires separate pipeline load without LoRA adapter; skipped in this run.",
+    }
+
+    # ── E: No CoT (direct answer prompt) ─────────────────────────────────────
+    print("  [E] No CoT (direct answer prompt)...")
+
+    @torch.no_grad()
+    def _diagnose_no_cot(pair) -> ScoredResult:
+        import time as _time
+        from src.prompts import IMAGE_PLACEHOLDER, format_retrieved_evidence
+        t0 = _time.time()
+        device = pipeline.llm.device
+
+        pv = pipeline.vision.preprocess(pair.image).to(device)
+        ve = pipeline.projector(pipeline.vision(pv))
+        retrieved = pipeline.retriever.query("chest X-ray", k=pipeline.config.retrieval_top_k)
+        evidence = format_retrieved_evidence([r.text for r in retrieved])
+
+        # Direct answer prompt — no CoT steps
+        direct_prompt = (
+            f"Chest X-ray image:\n{IMAGE_PLACEHOLDER}\n\n"
+            f"Retrieved evidence:\n{evidence}\n\n"
+            "Answer with only: DIAGNOSIS: NORMAL or DIAGNOSIS: ABNORMAL"
+        )
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user",   "content": direct_prompt},
+        ]
+        prompt_text = pipeline.llm.tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        emb, mask = pipeline._splice_visual(prompt_text, ve)
+        out_ids = pipeline.llm.model.generate(
+            inputs_embeds=emb, attention_mask=mask,
+            max_new_tokens=20,
+            do_sample=False,
+            pad_token_id=pipeline.llm.tokenizer.pad_token_id,
+        )
+        raw = pipeline.llm.tokenizer.decode(out_ids[0], skip_special_tokens=True)
+        parsed = _parse(raw)
+
+        # ClassificationHead still runs with visual features
+        p_abn = 0.5
+        if pipeline.cls_head is not None:
+            import numpy as np
+            rag_embs = [r.embedding for r in retrieved if r.embedding is not None]
+            if rag_embs:
+                rag_t = torch.from_numpy(np.stack(rag_embs)).unsqueeze(0).float().to(device)
+                logits = pipeline.cls_head(ve, rag_t)
+                p_abn = torch.softmax(logits, dim=-1)[0, 1].item()
+
+        return ScoredResult(
+            true_label=pair.label,
+            pred_label=parsed["diagnosis"] if parsed["diagnosis"] != "UNPARSEABLE" else (
+                "ABNORMAL" if p_abn >= pipeline.config.classification_threshold else "NORMAL"
+            ),
+            p_abnormal=p_abn,
+            reasoning=raw,
+            latency_s=_time.time() - t0,
+        )
+
+    no_cot_results = []
+    for pair in tqdm(samples, desc="  [E] No CoT", unit="sample"):
+        try:
+            no_cot_results.append(_diagnose_no_cot(pair))
+        except Exception as e:
+            tqdm.write(f"  skip: {e}")
+
+    ablation_results["no_cot"] = {
+        "auroc": _auroc_from_results(no_cot_results),
+        "n": len(no_cot_results),
+        "description": configs["no_cot"],
+    }
+    print(f"      AUROC = {ablation_results['no_cot']['auroc']:.4f}")
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    full_auroc = ablation_results["full_system"]["auroc"]
+    print("\n  === Exp 9 Ablation Summary ===")
+    for k, v in ablation_results.items():
+        auroc = v["auroc"]
+        if auroc is not None:
+            delta = round(auroc - full_auroc, 4) if full_auroc else 0.0
+            sign = "+" if delta >= 0 else ""
+            print(f"  {v['description']:<45} AUROC={auroc:.4f}  ({sign}{delta:.4f} vs full)")
+        else:
+            print(f"  {v['description']:<45} SKIPPED")
+
+    result = {
+        "experiment": 9,
+        "n_samples": max_samples,
+        "ablations": ablation_results,
+    }
+    _save_json(result, output_dir / "exp9_results.json")
+    return result
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 # Per-experiment hard caps applied regardless of global --max-samples.
@@ -656,9 +860,10 @@ _EXP_CAPS = {
     "6": 100,
     "7": 30,                   # ×4 inference (k=1,3,5,10)
     "8": 20,
+    "9": 50,                   # ×4 configs — capped at 50
 }
 
-_ALL_EXPS = ["1", "2", "3", "4a", "4b", "5", "6", "7", "8"]
+_ALL_EXPS = ["1", "2", "3", "4a", "4b", "5", "6", "7", "8", "9"]
 
 
 def main() -> None:
@@ -714,6 +919,7 @@ def main() -> None:
         "6":  lambda: exp6_calibration(pipeline, output_dir, _n("6")),
         "7":  lambda: exp7_rag_ablation(pipeline, output_dir, _n("7")),
         "8":  lambda: exp8_energy(pipeline, output_dir, _n("8"), args.tgp_w),
+        "9":  lambda: exp9_component_ablation(pipeline, output_dir, _n("9")),
     }
 
     for exp_id in exps:

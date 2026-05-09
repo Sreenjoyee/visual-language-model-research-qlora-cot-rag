@@ -173,23 +173,13 @@ class RadiopaediaSource(KnowledgeSource):
                 f"&fields=abstract"
                 f"&limit={self.per_query}"
             )
-            # Retry with exponential backoff on 429 rate limit
-            delay = 5.0
-            data = None
-            for attempt in range(4):
-                try:
-                    data = json.loads(_http_get(url, timeout=15))
-                    break
-                except Exception as e:
-                    if "429" in str(e) and attempt < 3:
-                        print(f"[RadiopaediaSource] rate limited, waiting {delay:.0f}s...")
-                        time.sleep(delay)
-                        delay *= 2
-                    else:
-                        print(f"[RadiopaediaSource] Semantic Scholar failed '{query[:40]}': {e}")
-                        break
-
-            if data is None:
+            try:
+                data = json.loads(_http_get(url, timeout=15))
+            except Exception as e:
+                if "429" in str(e):
+                    print("[RadiopaediaSource] Semantic Scholar rate limited — skipping source (no API key)")
+                    return  # stop all queries; rate limit won't clear mid-build
+                print(f"[RadiopaediaSource] Semantic Scholar failed '{query[:40]}': {e}")
                 continue
 
             for paper in data.get("data", []):

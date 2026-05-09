@@ -355,7 +355,7 @@ else
 
     if [[ -n "$LATEST_EXP_DIR" ]]; then
         # Build list of experiments that still need to run by checking each result file.
-        ALL_EXP_IDS=("1" "2" "3" "4a" "4b" "5" "6" "7" "8")
+        ALL_EXP_IDS=("1" "2" "3" "4a" "4b" "5" "6" "7" "8" "9")
         PENDING=()
         DONE=()
         for eid in "${ALL_EXP_IDS[@]}"; do
