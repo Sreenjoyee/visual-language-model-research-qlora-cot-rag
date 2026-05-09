@@ -135,16 +135,15 @@ class MimicReportsSource(KnowledgeSource):
 
 
 class RadiopaediaSource(KnowledgeSource):
-    """Radiology imaging-pattern knowledge from PubMed abstracts.
+    """PubMed abstracts via Semantic Scholar API.
 
-    Sources equivalent to Radiopaedia content (imaging patterns, pathology
-    explanations, radiology reasoning) via the NCBI E-utilities public API.
-    Free, no authentication required for up to 3 req/s.
+    Replaces NCBI E-utilities with Semantic Scholar — covers all PubMed papers,
+    free, no authentication, different servers so unaffected by NCBI outages.
+    Rate limit: ~1 req/s without API key.
     """
 
     name = "pubmed-radiology"
 
-    # Targets papers describing chest imaging findings and pathology patterns.
     _QUERIES: list[str] = [
         "chest radiograph findings interpretation pathology",
         "chest X-ray pneumonia consolidation opacity diagnosis",
@@ -156,66 +155,41 @@ class RadiopaediaSource(KnowledgeSource):
         "pulmonary nodule mass chest radiograph evaluation",
         "interstitial lung disease chest radiograph patterns",
     ]
-    _BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+    _BASE = "https://api.semanticscholar.org/graph/v1/paper/search"
 
-    def __init__(self, max_snippets: int = 300, per_query: int = 40):
+    def __init__(self, max_snippets: int = 300, per_query: int = 100):
         self.max_snippets = max_snippets
-        self.per_query = per_query
+        self.per_query = min(per_query, 100)  # Semantic Scholar max is 100
 
     def iter_snippets(self) -> Iterator[tuple[str, str]]:
-        email = CONFIG.pubmed_email
         yielded = 0
         for query in self._QUERIES:
             if yielded >= self.max_snippets:
                 break
 
-            # Step 1: search for PubMed IDs
-            search_url = (
-                f"{self._BASE}esearch.fcgi"
-                f"?db=pubmed"
-                f"&term={urllib.parse.quote(query)}"
-                f"&retmax={self.per_query}"
-                f"&retmode=json"
-                f"&email={email}"
+            url = (
+                f"{self._BASE}"
+                f"?query={urllib.parse.quote(query)}"
+                f"&fields=abstract"
+                f"&limit={self.per_query}"
             )
             try:
-                result = json.loads(_http_get(search_url, timeout=15))
-                ids = result.get("esearchresult", {}).get("idlist", [])
+                data = json.loads(_http_get(url, timeout=15))
+                papers = data.get("data", [])
             except Exception as e:
-                print(f"[RadiopaediaSource] search failed for '{query[:40]}': {e}")
+                print(f"[RadiopaediaSource] Semantic Scholar failed '{query[:40]}': {e}")
                 continue
 
-            if not ids:
-                continue
-
-            # Step 2: fetch abstracts
-            fetch_url = (
-                f"{self._BASE}efetch.fcgi"
-                f"?db=pubmed"
-                f"&id={','.join(ids)}"
-                f"&rettype=abstract"
-                f"&retmode=xml"
-                f"&email={email}"
-            )
-            try:
-                root = ET.fromstring(_http_get(fetch_url, timeout=20))
-            except Exception as e:
-                print(f"[RadiopaediaSource] fetch failed for query '{query[:40]}': {e}")
-                continue
-
-            for article in root.findall(".//PubmedArticle"):
+            for paper in papers:
                 if yielded >= self.max_snippets:
                     break
-                abstract_el = article.find(".//AbstractText")
-                if abstract_el is None or not abstract_el.text:
+                abstract = (paper.get("abstract") or "").strip()
+                if len(abstract) < 80:
                     continue
-                text = abstract_el.text.strip()
-                if len(text) < 80:
-                    continue
-                yield text, self.name
+                yield abstract, self.name
                 yielded += 1
 
-            time.sleep(0.34)  # NCBI rate limit: stay under 3 req/s
+            time.sleep(1.0)  # Semantic Scholar: ~1 req/s without API key
 
 
 class EuropePMCSource(KnowledgeSource):
@@ -393,15 +367,14 @@ class MedPixSource(KnowledgeSource):
 
 
 class RadiopaediaArticleSource(KnowledgeSource):
-    """PubMed Central full-text articles for chest X-ray findings.
+    """Full-text radiology articles via Europe PMC REST API.
 
-    Uses NCBI E-utilities to search PMC and fetch full article body text —
-    far richer than abstracts. Targets open-access radiology education and
-    review articles covering chest X-ray interpretation.
-    Free, no authentication, rate-limited to 3 req/s.
+    Replaces NCBI PMC full-text fetcher with Europe PMC — identical content
+    (Europe PMC mirrors PubMed Central), different servers, no NCBI dependency.
+    Returns full article text for open-access papers. Free, no auth required.
     """
 
-    name = "pmc-fulltext"
+    name = "europepmc-fulltext"
 
     _QUERIES: list[str] = [
         "chest radiograph normal interpretation systematic review",
@@ -416,36 +389,34 @@ class RadiopaediaArticleSource(KnowledgeSource):
         "chest X-ray interpretation education radiology",
     ]
 
-    _BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+    _SEARCH_BASE = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+    _FULLTEXT_BASE = "https://www.ebi.ac.uk/europepmc/webservices/rest"
     _MIN_LEN = 100
-    _PER_QUERY = 3  # full articles are large — 3 per query is enough
+    _PER_QUERY = 3
 
-    def _search_pmc_ids(self, query: str) -> list[str]:
+    def _search_ids(self, query: str) -> list[str]:
         url = (
-            f"{self._BASE}esearch.fcgi"
-            f"?db=pmc&term={urllib.parse.quote(query)}"
-            f"&retmax={self._PER_QUERY}&retmode=json"
-            f"&filter=open+access[filter]"
-            f"&email={CONFIG.pubmed_email}"
+            f"{self._SEARCH_BASE}"
+            f"?query={urllib.parse.quote(query)}+OPEN_ACCESS:Y"
+            f"&resultType=lite&format=json&pageSize={self._PER_QUERY}"
         )
         try:
-            result = json.loads(_http_get(url, timeout=15))
-            return result.get("esearchresult", {}).get("idlist", [])
+            data = json.loads(_http_get(url, timeout=15))
+            return [
+                r["pmcid"] for r in data.get("resultList", {}).get("result", [])
+                if r.get("pmcid")
+            ]
         except Exception as e:
-            print(f"[PMCFullTextSource] search failed '{query[:40]}': {e}")
+            print(f"[EuropePMCFullText] search failed '{query[:40]}': {e}")
             return []
 
-    def _fetch_paragraphs(self, pmc_id: str) -> list[str]:
-        url = (
-            f"{self._BASE}efetch.fcgi"
-            f"?db=pmc&id={pmc_id}&rettype=full&retmode=xml"
-            f"&email={CONFIG.pubmed_email}"
-        )
+    def _fetch_paragraphs(self, pmcid: str) -> list[str]:
+        url = f"{self._FULLTEXT_BASE}/{pmcid}/fullTextXML"
         try:
             raw = _http_get(url, timeout=20)
             root = ET.fromstring(raw)
         except Exception as e:
-            print(f"[PMCFullTextSource] fetch failed PMC{pmc_id}: {e}")
+            print(f"[EuropePMCFullText] fetch failed {pmcid}: {e}")
             return []
 
         paragraphs = []
@@ -456,17 +427,17 @@ class RadiopaediaArticleSource(KnowledgeSource):
         return paragraphs
 
     def iter_snippets(self) -> Iterator[tuple[str, str]]:
-        seen_ids: set[str] = set()
+        seen: set[str] = set()
         for query in self._QUERIES:
-            ids = self._search_pmc_ids(query)
-            time.sleep(0.34)
-            for pmc_id in ids:
-                if pmc_id in seen_ids:
+            ids = self._search_ids(query)
+            time.sleep(1.0)
+            for pmcid in ids:
+                if pmcid in seen:
                     continue
-                seen_ids.add(pmc_id)
-                for para in self._fetch_paragraphs(pmc_id):
+                seen.add(pmcid)
+                for para in self._fetch_paragraphs(pmcid):
                     yield para, self.name
-                time.sleep(0.34)
+                time.sleep(1.0)
 
 
 class GuidelinesSource(KnowledgeSource):

@@ -84,12 +84,9 @@ def main() -> int:
     else:
         print("[build_faiss] Source 1: MIMIC-CXR SKIPPED")
 
-    # Source 2: PubMed via NCBI E-utilities (skipped if --skip-ncbi)
-    if not args.skip_ncbi:
-        sources.append(RadiopaediaSource(max_snippets=args.max_pubmed))
-        print(f"[build_faiss] Source 2: PubMed/NCBI radiology (max {args.max_pubmed} snippets)")
-    else:
-        print("[build_faiss] Source 2: PubMed/NCBI SKIPPED (--skip-ncbi)")
+    # Source 2: PubMed abstracts via Semantic Scholar (no NCBI dependency)
+    sources.append(RadiopaediaSource(max_snippets=args.max_pubmed))
+    print(f"[build_faiss] Source 2: Semantic Scholar PubMed abstracts (max {args.max_pubmed} snippets)")
 
     # Source 3: PubMed via Europe PMC REST API (different endpoint — works when NCBI is blocked)
     sources.append(EuropePMCSource(max_snippets=args.max_pubmed))
@@ -103,12 +100,9 @@ def main() -> int:
     sources.append(MedPixSource(max_snippets=args.max_iuxray))
     print(f"[build_faiss] Source 5: IU-Xray/MedPix (max {args.max_iuxray} snippets)")
 
-    # Source 6: PMC full-text radiology articles (skipped if --skip-ncbi)
-    if not args.skip_ncbi:
-        sources.append(RadiopaediaArticleSource())
-        print("[build_faiss] Source 6: PMC full-text radiology articles (10 queries x 3 articles)")
-    else:
-        print("[build_faiss] Source 6: PMC full-text SKIPPED (--skip-ncbi)")
+    # Source 6: Europe PMC full-text articles (no NCBI dependency)
+    sources.append(RadiopaediaArticleSource())
+    print("[build_faiss] Source 6: Europe PMC full-text radiology articles (10 queries x 3 articles)")
 
     # Source 7: Static ACR/RSNA/WHO guidelines (always included, no network needed)
     sources.append(GuidelinesSource())
