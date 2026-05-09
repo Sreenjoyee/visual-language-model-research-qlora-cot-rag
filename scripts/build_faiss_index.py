@@ -95,9 +95,9 @@ def main() -> int:
     sources.append(MedPixSource(max_snippets=args.max_iuxray))
     print(f"[build_faiss] Source 5: IU-Xray/MedPix (max {args.max_iuxray} snippets)")
 
-    # Source 6: Real Radiopaedia.org articles for chest X-ray findings
+    # Source 6: PMC full-text radiology articles (open access)
     sources.append(RadiopaediaArticleSource())
-    print("[build_faiss] Source 6: Radiopaedia.org chest X-ray articles (20 articles)")
+    print("[build_faiss] Source 6: PMC full-text radiology articles (10 queries x 3 articles)")
 
     # Source 7: Static ACR/RSNA/WHO guidelines (always included, no network needed)
     sources.append(GuidelinesSource())

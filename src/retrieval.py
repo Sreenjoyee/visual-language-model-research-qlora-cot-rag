@@ -387,75 +387,80 @@ class MedPixSource(KnowledgeSource):
 
 
 class RadiopaediaArticleSource(KnowledgeSource):
-    """Real Radiopaedia.org article content for chest X-ray findings.
+    """PubMed Central full-text articles for chest X-ray findings.
 
-    Fetches a curated list of Radiopaedia articles covering the key chest
-    X-ray findings relevant to NORMAL/ABNORMAL classification. Each article
-    is split into paragraph-level snippets for fine-grained retrieval.
-
-    Respects rate limits (1 req/3s). Fails silently per article so a single
-    blocked page doesn't abort the index build.
+    Uses NCBI E-utilities to search PMC and fetch full article body text —
+    far richer than abstracts. Targets open-access radiology education and
+    review articles covering chest X-ray interpretation.
+    Free, no authentication, rate-limited to 3 req/s.
     """
 
-    name = "radiopaedia"
+    name = "pmc-fulltext"
 
-    _ARTICLES: list[tuple[str, str]] = [
-        ("normal-chest-radiograph-1",         "Normal chest radiograph"),
-        ("chest-radiograph-approach-1",       "Chest radiograph approach"),
-        ("consolidation-1",                   "Lung consolidation"),
-        ("pneumonia-overview-1",              "Pneumonia"),
-        ("pleural-effusion-1",                "Pleural effusion"),
-        ("pneumothorax-1",                    "Pneumothorax"),
-        ("pulmonary-oedema-1",                "Pulmonary oedema"),
-        ("cardiomegaly-1",                    "Cardiomegaly"),
-        ("cardiothoracic-ratio-1",            "Cardiothoracic ratio"),
-        ("atelectasis-1",                     "Atelectasis"),
-        ("airspace-opacity-1",                "Airspace opacity"),
-        ("interstitial-lung-disease-1",       "Interstitial lung disease"),
-        ("pulmonary-nodule-1",                "Pulmonary nodule"),
-        ("ground-glass-opacity-1",            "Ground glass opacity"),
-        ("pulmonary-fibrosis-1",              "Pulmonary fibrosis"),
-        ("silhouette-sign-chest-radiograph-1","Silhouette sign"),
-        ("kerley-lines-1",                    "Kerley lines"),
-        ("air-bronchogram-1",                 "Air bronchogram"),
-        ("blunting-of-costophrenic-angle-1",  "Costophrenic angle blunting"),
-        ("mediastinal-widening-1",            "Mediastinal widening"),
+    _QUERIES: list[str] = [
+        "chest radiograph normal interpretation systematic review",
+        "pneumonia chest X-ray radiographic diagnosis findings",
+        "pleural effusion chest radiograph imaging diagnosis",
+        "pneumothorax chest radiograph diagnosis management",
+        "pulmonary edema chest radiograph cardiogenic diagnosis",
+        "cardiomegaly chest radiograph cardiothoracic ratio",
+        "atelectasis chest radiograph lobar collapse",
+        "interstitial lung disease chest radiograph patterns",
+        "pulmonary nodule chest radiograph malignancy evaluation",
+        "chest X-ray interpretation education radiology",
     ]
 
-    _BASE = "https://radiopaedia.org/articles/"
-    _HEADERS = {
-        "User-Agent": (
-            "Mozilla/5.0 (compatible; MedDiagResearch/1.0; "
-            "+https://github.com/Sreenjoyee/visual-language-model-research-qlora-cot-rag)"
-        ),
-        "Accept": "text/html",
-    }
-    _MIN_LEN = 80
+    _BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+    _MIN_LEN = 100
+    _PER_QUERY = 3  # full articles are large — 3 per query is enough
 
-    def _fetch_article(self, slug: str) -> list[str]:
-        """Fetch one Radiopaedia article and return cleaned paragraph snippets."""
-        import re
-        url = f"{self._BASE}{slug}"
-        req = urllib.request.Request(url, headers=self._HEADERS)
+    def _search_pmc_ids(self, query: str) -> list[str]:
+        url = (
+            f"{self._BASE}esearch.fcgi"
+            f"?db=pmc&term={urllib.parse.quote(query)}"
+            f"&retmax={self._PER_QUERY}&retmode=json"
+            f"&filter=open+access[filter]"
+            f"&email={CONFIG.pubmed_email}"
+        )
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                html = resp.read().decode("utf-8", errors="ignore")
+            result = json.loads(_http_get(url, timeout=15))
+            return result.get("esearchresult", {}).get("idlist", [])
         except Exception as e:
-            print(f"[RadiopaediaArticleSource] skip {slug}: {e}")
+            print(f"[PMCFullTextSource] search failed '{query[:40]}': {e}")
             return []
 
-        # Strip tags, collapse whitespace, split on double-newlines
-        text = re.sub(r"<[^>]+>", " ", html)
-        text = re.sub(r"[ \t]+", " ", text)
-        paragraphs = [p.strip() for p in re.split(r"\n{2,}", text)]
-        return [p for p in paragraphs if len(p) >= self._MIN_LEN]
+    def _fetch_paragraphs(self, pmc_id: str) -> list[str]:
+        url = (
+            f"{self._BASE}efetch.fcgi"
+            f"?db=pmc&id={pmc_id}&rettype=full&retmode=xml"
+            f"&email={CONFIG.pubmed_email}"
+        )
+        try:
+            raw = _http_get(url, timeout=20)
+            root = ET.fromstring(raw)
+        except Exception as e:
+            print(f"[PMCFullTextSource] fetch failed PMC{pmc_id}: {e}")
+            return []
+
+        paragraphs = []
+        for p in root.findall(".//p"):
+            text = "".join(p.itertext()).strip()
+            if len(text) >= self._MIN_LEN:
+                paragraphs.append(text)
+        return paragraphs
 
     def iter_snippets(self) -> Iterator[tuple[str, str]]:
-        for slug, title in self._ARTICLES:
-            paragraphs = self._fetch_article(slug)
-            for para in paragraphs:
-                yield f"{title}: {para}", self.name
-            time.sleep(3.0)  # be polite — 1 req/3s
+        seen_ids: set[str] = set()
+        for query in self._QUERIES:
+            ids = self._search_pmc_ids(query)
+            time.sleep(0.34)
+            for pmc_id in ids:
+                if pmc_id in seen_ids:
+                    continue
+                seen_ids.add(pmc_id)
+                for para in self._fetch_paragraphs(pmc_id):
+                    yield para, self.name
+                time.sleep(0.34)
 
 
 class GuidelinesSource(KnowledgeSource):
