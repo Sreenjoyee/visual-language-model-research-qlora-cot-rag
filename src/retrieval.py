@@ -163,6 +163,10 @@ class RadiopaediaSource(KnowledgeSource):
 
     def iter_snippets(self) -> Iterator[tuple[str, str]]:
         yielded = 0
+        api_key = os.environ.get("SEMANTIC_SCHOLAR_API_KEY", "")
+        if api_key:
+            print("[RadiopaediaSource] Semantic Scholar: API key found — using authenticated requests")
+
         for query in self._QUERIES:
             if yielded >= self.max_snippets:
                 break
@@ -174,11 +178,13 @@ class RadiopaediaSource(KnowledgeSource):
                 f"&limit={self.per_query}"
             )
             try:
-                data = json.loads(_http_get(url, timeout=15))
+                req = urllib.request.Request(url, headers={"x-api-key": api_key} if api_key else {})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read())
             except Exception as e:
                 if "429" in str(e):
-                    print("[RadiopaediaSource] Semantic Scholar rate limited — skipping source (no API key)")
-                    return  # stop all queries; rate limit won't clear mid-build
+                    print("[RadiopaediaSource] Semantic Scholar rate limited — skipping source")
+                    return
                 print(f"[RadiopaediaSource] Semantic Scholar failed '{query[:40]}': {e}")
                 continue
 
@@ -191,7 +197,7 @@ class RadiopaediaSource(KnowledgeSource):
                 yield abstract, self.name
                 yielded += 1
 
-            time.sleep(3.0)  # conservative delay between queries
+            time.sleep(1.0)  # 1 req/s with API key
 
 
 class OpenAlexSource(KnowledgeSource):
