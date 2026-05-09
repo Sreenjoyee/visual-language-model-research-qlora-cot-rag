@@ -63,6 +63,12 @@ def main() -> int:
         action="store_true",
         help="Skip MIMIC source (useful when HF_TOKEN is not available).",
     )
+    parser.add_argument(
+        "--skip-ncbi",
+        action="store_true",
+        help="Skip all NCBI-dependent sources (RadiopaediaSource, PMC full-text). "
+             "Use when eutils.ncbi.nlm.nih.gov is unreachable.",
+    )
     args = parser.parse_args()
 
     # MIMIC requires token; other sources do not.
@@ -78,12 +84,14 @@ def main() -> int:
     else:
         print("[build_faiss] Source 1: MIMIC-CXR SKIPPED")
 
-    # Source 2: PubMed via NCBI E-utilities (may fail on restricted networks)
-    sources.append(RadiopaediaSource(max_snippets=args.max_pubmed))
-    print(f"[build_faiss] Source 2: PubMed/NCBI radiology (max {args.max_pubmed} snippets)")
+    # Source 2: PubMed via NCBI E-utilities (skipped if --skip-ncbi)
+    if not args.skip_ncbi:
+        sources.append(RadiopaediaSource(max_snippets=args.max_pubmed))
+        print(f"[build_faiss] Source 2: PubMed/NCBI radiology (max {args.max_pubmed} snippets)")
+    else:
+        print("[build_faiss] Source 2: PubMed/NCBI SKIPPED (--skip-ncbi)")
 
-    # Source 3: PubMed via Europe PMC REST API (fallback — different endpoint,
-    # no auth, accessible when NCBI is blocked or unreachable)
+    # Source 3: PubMed via Europe PMC REST API (different endpoint — works when NCBI is blocked)
     sources.append(EuropePMCSource(max_snippets=args.max_pubmed))
     print(f"[build_faiss] Source 3: PubMed/EuropePMC radiology (max {args.max_pubmed} snippets)")
 
@@ -95,9 +103,12 @@ def main() -> int:
     sources.append(MedPixSource(max_snippets=args.max_iuxray))
     print(f"[build_faiss] Source 5: IU-Xray/MedPix (max {args.max_iuxray} snippets)")
 
-    # Source 6: PMC full-text radiology articles (open access)
-    sources.append(RadiopaediaArticleSource())
-    print("[build_faiss] Source 6: PMC full-text radiology articles (10 queries x 3 articles)")
+    # Source 6: PMC full-text radiology articles (skipped if --skip-ncbi)
+    if not args.skip_ncbi:
+        sources.append(RadiopaediaArticleSource())
+        print("[build_faiss] Source 6: PMC full-text radiology articles (10 queries x 3 articles)")
+    else:
+        print("[build_faiss] Source 6: PMC full-text SKIPPED (--skip-ncbi)")
 
     # Source 7: Static ACR/RSNA/WHO guidelines (always included, no network needed)
     sources.append(GuidelinesSource())

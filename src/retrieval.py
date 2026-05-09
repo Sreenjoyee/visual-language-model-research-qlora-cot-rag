@@ -29,10 +29,16 @@ INDEX_FILENAME = "index.faiss"
 META_FILENAME = "meta.jsonl"
 
 
-def _http_get(url: str, timeout: int) -> bytes:
-    """Minimal HTTP GET returning raw bytes."""
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
-        return resp.read()
+def _http_get(url: str, timeout: int = 10) -> bytes:
+    """Minimal HTTP GET returning raw bytes. Hard timeout prevents DNS hangs."""
+    import socket
+    old_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(timeout)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return resp.read()
+    finally:
+        socket.setdefaulttimeout(old_timeout)
 
 
 def _detect_text_col(example: dict, cols: Sequence[str]) -> str | None:
@@ -682,15 +688,19 @@ class Retriever:
             buffer_sources.clear()
 
         for src in sources:
-            for text, source_tag in src.iter_snippets():
-                buffer_texts.append(text)
-                buffer_sources.append(source_tag)
-                if len(buffer_texts) >= batch_size:
-                    flush()
-        flush()
+            try:
+                for text, source_tag in src.iter_snippets():
+                    buffer_texts.append(text)
+                    buffer_sources.append(source_tag)
+                    if len(buffer_texts) >= batch_size:
+                        flush()
+            except Exception as e:
+                print(f"[Retriever] source {src.name} failed, skipping: {type(e).__name__}: {e}")
+            finally:
+                flush()
 
         if self.index.ntotal == 0:
-            raise RuntimeError("FAISS index is empty after build — no snippets ingested.")
+            raise RuntimeError("FAISS index is empty — all sources failed. Check network.")
 
     # ---- Persist ----
 
