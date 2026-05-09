@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 import time
 from dataclasses import dataclass
@@ -51,7 +52,12 @@ from src.data.balanced_stream import LabeledPair, balanced_mimic_stream, check_l
 from src.data.iu_xray_stream import iu_xray_abnormal_training_stream, iu_xray_normal_training_stream
 from src.llm import LoadedLLM, load_llm
 from src.projector import PerceiverResampler
-from src.prompts import IMAGE_PLACEHOLDER, build_chat_messages, build_classification_target
+from src.prompts import (
+    IMAGE_PLACEHOLDER,
+    build_chat_messages,
+    build_classification_target,
+    maybe_inject_adversarial,
+)
 from src.retrieval import Retriever
 from src.vision import VisionEncoder
 
@@ -114,6 +120,7 @@ def _encode_example(
     config: Config,
     max_target_tokens: int = 600,
     step_idx: int = 0,
+    adv_rng: "random.Random | None" = None,
 ) -> BatchTensors:
     """Encode one labeled pair into training tensors.
 
@@ -131,6 +138,12 @@ def _encode_example(
     first_sentence = pair.report.split(".")[0].strip()[:150]
     retrieved = retriever.query(first_sentence, k=config.retrieval_top_k)
     snippets = [r.text for r in retrieved]
+
+    # Adversarial injection: with ADVERSARIAL_INJECTION_PROB, replace the last
+    # snippet with a misleading one. The label stays correct — model must learn
+    # to trust visual features over text when they conflict.
+    if adv_rng is not None:
+        snippets = maybe_inject_adversarial(snippets, adv_rng)
 
     # Stack RAG embeddings for ClassificationHead — fall back to zeros if any
     # snippet is missing its embedding (shouldn't happen with IndexFlatL2).
@@ -367,6 +380,7 @@ def train(
     first_step_grad_checked = False
     accum_loss = 0.0
     micro_step = 0
+    adv_rng = random.Random(42)  # seeded for reproducibility
 
     # Pre-load IU-Xray samples once — reused across epochs.
     print("[stage2] Pre-loading IU-Xray NORMAL training samples...")
@@ -399,7 +413,7 @@ def train(
         stream = _interleaved(mimic_stream, iu_normal_cycle, iu_abnormal_cycle)
         for pair in stream:
             try:
-                batch = _encode_example(pair, vision, projector, llm, retriever, config, step_idx=global_step)
+                batch = _encode_example(pair, vision, projector, llm, retriever, config, step_idx=global_step, adv_rng=adv_rng)
             except Exception as e:
                 print(f"[stage2] skip sample ({pair.label}): {type(e).__name__}: {e}")
                 continue
