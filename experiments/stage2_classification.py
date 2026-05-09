@@ -112,6 +112,7 @@ def _encode_example(
     retriever: Retriever,
     config: Config,
     max_target_tokens: int = 256,
+    step_idx: int = 0,
 ) -> BatchTensors:
     """Encode one labeled pair into training tensors.
 
@@ -152,7 +153,7 @@ def _encode_example(
     right_ids = tokenizer(right_text, add_special_tokens=False, return_tensors="pt").input_ids.to(device)
 
     # 3. Classification target — training-only, never in inference prompt
-    target_text = build_classification_target(pair.label)
+    target_text = build_classification_target(pair.label, idx=step_idx)
     target_ids = tokenizer(
         target_text,
         add_special_tokens=False,
@@ -372,7 +373,7 @@ def train(
         stream = balanced_mimic_stream(config, split="train", max_pairs=max_pairs)
         for pair in stream:
             try:
-                batch = _encode_example(pair, vision, projector, llm, retriever, config)
+                batch = _encode_example(pair, vision, projector, llm, retriever, config, step_idx=global_step)
             except Exception as e:
                 print(f"[stage2] skip sample ({pair.label}): {type(e).__name__}: {e}")
                 continue
