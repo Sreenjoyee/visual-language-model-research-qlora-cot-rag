@@ -351,7 +351,15 @@ def train(
         weight_decay=0.01,
     )
 
-    total_steps = epochs * max_pairs // max(grad_accum_steps, 1)
+    # Account for IU-Xray and Kermany interleaving — each MIMIC pair yields
+    # 5 samples (1 MIMIC + 1 IU-Normal + 1 IU-Abnormal + 1 Kerm-Normal + 1 Kerm-Abnormal)
+    # so the actual optimizer steps are ~5x the naive estimate.
+    _interleave_factor = 1
+    if iu_xray_normals:   _interleave_factor += 1
+    if iu_xray_abnormals: _interleave_factor += 1
+    if pneumonia_normals:  _interleave_factor += 1
+    if pneumonia_abnormals: _interleave_factor += 1
+    total_steps = epochs * max_pairs * _interleave_factor // max(grad_accum_steps, 1)
     scheduler = get_cosine_schedule_with_warmup(
         optimizer,
         num_warmup_steps=warmup_steps,
