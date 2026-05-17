@@ -120,7 +120,7 @@ def _encode_example(
     llm: LoadedLLM,
     retriever: Retriever,
     config: Config,
-    max_target_tokens: int = 400,
+    max_target_tokens: int = 500,
     step_idx: int = 0,
     adv_rng: "random.Random | None" = None,
 ) -> BatchTensors:
