@@ -120,7 +120,7 @@ def _encode_example(
     llm: LoadedLLM,
     retriever: Retriever,
     config: Config,
-    max_target_tokens: int = 600,
+    max_target_tokens: int = 400,
     step_idx: int = 0,
     adv_rng: "random.Random | None" = None,
 ) -> BatchTensors:
@@ -477,15 +477,34 @@ def train(
                 scaled_loss.backward()
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
-                    print(f"[stage2] OOM on backward at micro_step {micro_step} — skipping sample, clearing cache")
-                    torch.cuda.empty_cache()
-                    optimizer.zero_grad(set_to_none=True)
+                    print(f"[stage2] OOM on backward — skipping sample and clearing cache")
+                    try:
+                        # Delete tensors explicitly before clearing cache
+                        del scaled_loss, loss, cls_loss, lm_loss, out
+                        del cls_logits, label_tensor, batch
+                    except Exception:
+                        pass
+                    try:
+                        torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+                    try:
+                        optimizer.zero_grad(set_to_none=True)
+                    except Exception:
+                        pass
                     micro_step = 0
                     accum_loss = 0.0
                     accum_cls_loss = 0.0
                     accum_lm_loss = 0.0
                     continue
                 raise
+
+            # Periodic cache clearing every 100 micro-steps to prevent fragmentation
+            if micro_step % 100 == 0:
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
             accum_loss += loss.item()
             accum_cls_loss += cls_loss.item()
             accum_lm_loss += lm_loss.item()
