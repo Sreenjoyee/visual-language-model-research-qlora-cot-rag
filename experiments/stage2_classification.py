@@ -473,7 +473,19 @@ def train(
             loss = alpha * cls_loss + (1.0 - alpha) * lm_loss
 
             scaled_loss = loss / grad_accum_steps
-            scaled_loss.backward()
+            try:
+                scaled_loss.backward()
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    print(f"[stage2] OOM on backward at micro_step {micro_step} — skipping sample, clearing cache")
+                    torch.cuda.empty_cache()
+                    optimizer.zero_grad(set_to_none=True)
+                    micro_step = 0
+                    accum_loss = 0.0
+                    accum_cls_loss = 0.0
+                    accum_lm_loss = 0.0
+                    continue
+                raise
             accum_loss += loss.item()
             accum_cls_loss += cls_loss.item()
             accum_lm_loss += lm_loss.item()
