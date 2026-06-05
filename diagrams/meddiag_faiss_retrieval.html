@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>FAISS Retrieval Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  @media screen {
+    html { zoom: 2.4; }
+    body { background: #475569; padding: 10px; display: flex;
+           flex-direction: column; align-items: flex-start; gap: 3px; }
+  }
+  @media print {
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    html { zoom: 1; }
+    @page { size: 176mm 128mm; margin: 0; }
+    body { background: white; padding: 0; display: block; }
+    .canvas  { box-shadow: none; }
+    .caption { box-shadow: none; margin-top: 0; }
+  }
+
+  .canvas {
+    width: 176mm; height: 92mm;
+    background: #F8FAFC;
+    position: relative;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.28);
+    font-family: 'Inter', sans-serif;
+  }
+
+  .hdr {
+    position: absolute; top: 0; left: 0; right: 0; height: 11mm;
+    background: linear-gradient(135deg, #0F2A57 0%, #1D4ED8 100%);
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 0 3mm;
+  }
+  .hdr-title { font-size: 6pt; font-weight: 700; color: #F8FAFC; letter-spacing: 0.04em; }
+  .hdr-sub   { font-size: 4pt; color: #BFDBFE; margin-top: 0.4mm; }
+
+  .pt {
+    font-size: 3.8pt; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: #1E40AF;
+    padding: 1.2mm 2mm 0.8mm;
+    border-bottom: 0.25mm solid #BFDBFE;
+    background: #EFF6FF;
+  }
+
+  .step {
+    margin: 0 2mm;
+    background: #FFFFFF;
+    border: 0.25mm solid #CBD5E1;
+    border-radius: 1mm;
+    padding: 0.9mm 1.5mm;
+  }
+  .step-label  { font-size: 3.6pt; font-weight: 600; color: #334155; margin-bottom: 0.4mm; }
+  .step-detail { font-size: 3pt; color: #64748B; line-height: 1.35; }
+  .mono { font-family: 'JetBrains Mono', monospace; font-size: 2.8pt; }
+
+  .arr { text-align: center; font-size: 5.5pt; color: #94A3B8;
+         line-height: 3mm; height: 3mm; margin: 0.4mm 0; }
+
+  .xray-box {
+    margin: 0 2mm;
+    height: 19mm;
+    background: #0F172A;
+    border-radius: 1mm;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 0.5mm;
+  }
+
+  .stag {
+    display: inline-block;
+    font-size: 2.8pt; font-weight: 600;
+    padding: 0.15mm 0.9mm;
+    border-radius: 0.5mm;
+    line-height: 1.6;
+  }
+
+  .card {
+    margin: 0 1.5mm 1mm;
+    background: #FFFFFF;
+    border: 0.25mm solid #E2E8F0;
+    border-left: 1mm solid;
+    border-radius: 0 0.8mm 0.8mm 0;
+    padding: 0.7mm 1mm;
+    overflow: visible;
+  }
+  .card-num  { font-size: 3.8pt; font-weight: 700; color: #1E293B;
+               float: left; margin-right: 0.8mm; line-height: 1.4; }
+  .card-text { font-size: 2.9pt; color: #475569; line-height: 1.3; font-style: italic; }
+  .card-src  { margin-top: 0.4mm; }
+
+  .legend {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 6mm;
+    background: #F1F5F9; border-top: 0.25mm solid #E2E8F0;
+    display: flex; align-items: center;
+    padding: 0 3mm; gap: 4mm; flex-wrap: nowrap;
+  }
+  .leg-item { display: flex; align-items: center; gap: 0.8mm; white-space: nowrap; }
+  .leg-dot  { width: 2mm; height: 2mm; border-radius: 50%; flex-shrink: 0; }
+  .leg-dash { width: 4mm; height: 0; border-top: 0.45mm dashed #F59E0B; flex-shrink: 0; }
+  .leg-lbl  { font-size: 3pt; color: #475569; }
+
+  .caption {
+    width: 176mm;
+    background: white;
+    padding: 2.5mm 3mm;
+    font-family: 'Inter', sans-serif;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.18);
+    margin-top: 2px;
+  }
+  .cap-label { font-size: 4.5pt; font-weight: 700; color: #1E293B; }
+  .cap-body  { font-size: 4pt; color: #334155; line-height: 1.5; margin-top: 0.5mm; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- Header -->
+  <div class="hdr">
+    <div class="hdr-title">Evidence Retrieval via FAISS Nearest-Neighbour Search</div>
+    <div class="hdr-sub">IndexFlatL2 &middot; sentence-transformers/all-MiniLM-L6-v2 (d&thinsp;=&thinsp;384) &middot; 24,460 passages &middot; k&thinsp;=&thinsp;5 (ablation-selected)</div>
+  </div>
+
+  <!-- Panel dividers -->
+  <div style="position:absolute;top:11mm;bottom:6mm;left:52mm;width:0.25mm;background:#CBD5E1;"></div>
+  <div style="position:absolute;top:11mm;bottom:6mm;left:124mm;width:0.25mm;background:#CBD5E1;"></div>
+
+  <!-- ══ Panel 1: Query Formation (0–52mm) ══ -->
+  <div style="position:absolute;top:11mm;left:0;width:52mm;">
+    <div class="pt">Query Formation</div>
+
+    <div style="margin-top:1.5mm;">
+      <div class="xray-box">
+        <img src="../sample_xray.jpg"
+             style="display:block;max-width:100%;max-height:16mm;object-fit:contain;border-radius:0.5mm;">
+        <div style="font-size:2.8pt;color:#94A3B8;margin-top:0.5mm;font-family:'Inter',sans-serif;">
+          AP portable chest radiograph</div>
+      </div>
+    </div>
+
+    <div class="arr">&#8595;</div>
+
+    <div class="step">
+      <div class="step-label">LLaMA-3.2-3B &middot; impression decoder</div>
+      <div class="step-detail">Produces a text description of salient imaging findings from visual tokens</div>
+    </div>
+
+    <div class="arr">&#8595;</div>
+
+    <div class="step">
+      <div class="step-label">MiniLM-L6-v2 &middot; sentence encoder</div>
+      <div class="step-detail">Encodes the description to a 384-dim embedding (<span class="mono">normalize_embeddings=False</span>)</div>
+    </div>
+
+    <div class="arr">&#8595;</div>
+
+    <div style="margin:0 2mm;background:#EFF6FF;border:0.3mm solid #BFDBFE;
+                border-radius:1mm;padding:0.9mm 1.5mm;text-align:center;">
+      <div style="font-size:4pt;font-weight:700;color:#1E40AF;
+                  font-family:'JetBrains Mono',monospace;">q &#8712; &#8477;<sup style="font-size:2.8pt;">384</sup></div>
+      <div style="font-size:3pt;color:#3B82F6;margin-top:0.3mm;">query embedding</div>
+    </div>
+  </div>
+
+  <!-- ══ Panel 2: FAISS Vector Index (52–124mm) ══ -->
+  <div style="position:absolute;top:11mm;left:52mm;width:72mm;">
+    <div class="pt" style="text-align:center;">FAISS IndexFlatL2 &middot; Vector Space (PCA projection)</div>
+
+    <!-- SVG scatter plot -->
+    <svg viewBox="0 0 286 176" style="display:block;width:68mm;height:41mm;margin:1mm 2mm 0;"
+         xmlns="http://www.w3.org/2000/svg">
+      <rect width="286" height="176" fill="#F8FAFC" rx="3"/>
+      <!-- Grid -->
+      <g stroke="#E2E8F0" stroke-width="0.5">
+        <line x1="72" y1="0" x2="72" y2="176"/>
+        <line x1="144" y1="0" x2="144" y2="176"/>
+        <line x1="216" y1="0" x2="216" y2="176"/>
+        <line x1="0" y1="44" x2="286" y2="44"/>
+        <line x1="0" y1="88" x2="286" y2="88"/>
+        <line x1="0" y1="132" x2="286" y2="132"/>
+      </g>
+      <!-- Cluster A: normal findings (top-left) -->
+      <g fill="#94A3B8" opacity="0.6">
+        <circle cx="35" cy="25" r="2.5"/><circle cx="42" cy="33" r="2.5"/>
+        <circle cx="28" cy="40" r="2.5"/><circle cx="55" cy="20" r="2.5"/>
+        <circle cx="48" cy="42" r="2.5"/><circle cx="38" cy="54" r="2.5"/>
+        <circle cx="62" cy="30" r="2.5"/><circle cx="70" cy="44" r="2.5"/>
+        <circle cx="30" cy="52" r="2.5"/><circle cx="58" cy="50" r="2.5"/>
+        <circle cx="45" cy="62" r="2.5"/><circle cx="68" cy="28" r="2.5"/>
+        <circle cx="75" cy="40" r="2.5"/><circle cx="52" cy="66" r="2.5"/>
+        <circle cx="40" cy="28" r="2.5"/><circle cx="22" cy="36" r="2.5"/>
+        <circle cx="18" cy="56" r="2.5"/><circle cx="60" cy="72" r="2.5"/>
+      </g>
+      <!-- Cluster B: pathology (centre) — query near here -->
+      <g fill="#94A3B8" opacity="0.6">
+        <circle cx="148" cy="78" r="2.5"/><circle cx="140" cy="100" r="2.5"/>
+        <circle cx="155" cy="94" r="2.5"/><circle cx="125" cy="110" r="2.5"/>
+        <circle cx="160" cy="82" r="2.5"/><circle cx="145" cy="117" r="2.5"/>
+        <circle cx="132" cy="120" r="2.5"/><circle cx="118" cy="127" r="2.5"/>
+        <circle cx="152" cy="127" r="2.5"/><circle cx="170" cy="114" r="2.5"/>
+        <circle cx="135" cy="65" r="2.5"/><circle cx="168" cy="98" r="2.5"/>
+        <circle cx="175" cy="130" r="2.5"/>
+      </g>
+      <!-- Cluster C: pleural/effusion (bottom-right) -->
+      <g fill="#94A3B8" opacity="0.6">
+        <circle cx="202" cy="120" r="2.5"/><circle cx="216" cy="112" r="2.5"/>
+        <circle cx="228" cy="128" r="2.5"/><circle cx="208" cy="142" r="2.5"/>
+        <circle cx="222" cy="154" r="2.5"/><circle cx="244" cy="116" r="2.5"/>
+        <circle cx="235" cy="136" r="2.5"/><circle cx="205" cy="158" r="2.5"/>
+        <circle cx="250" cy="130" r="2.5"/><circle cx="226" cy="164" r="2.5"/>
+        <circle cx="196" cy="138" r="2.5"/><circle cx="240" cy="150" r="2.5"/>
+        <circle cx="252" cy="148" r="2.5"/>
+      </g>
+      <!-- Scattered -->
+      <g fill="#94A3B8" opacity="0.6">
+        <circle cx="92" cy="30" r="2.5"/><circle cx="172" cy="46" r="2.5"/>
+        <circle cx="85" cy="148" r="2.5"/><circle cx="184" cy="164" r="2.5"/>
+        <circle cx="264" cy="84" r="2.5"/><circle cx="80" cy="97" r="2.5"/>
+        <circle cx="254" cy="165" r="2.5"/><circle cx="170" cy="138" r="2.5"/>
+        <circle cx="93" cy="160" r="2.5"/><circle cx="179" cy="25" r="2.5"/>
+        <circle cx="272" cy="52" r="2.5"/><circle cx="13" cy="14" r="2.5"/>
+        <circle cx="280" cy="14" r="2.5"/>
+      </g>
+      <!-- k-NN radius (dashed amber) -->
+      <circle cx="122" cy="90" r="30" fill="none"
+              stroke="#F59E0B" stroke-width="0.9" stroke-dasharray="4 3" opacity="0.75"/>
+      <!-- Lines query → 5 NN -->
+      <g stroke="#F59E0B" stroke-width="0.8" opacity="0.65">
+        <line x1="122" y1="90" x2="113" y2="80"/>
+        <line x1="122" y1="90" x2="130" y2="72"/>
+        <line x1="122" y1="90" x2="107" y2="92"/>
+        <line x1="122" y1="90" x2="136" y2="86"/>
+        <line x1="122" y1="90" x2="118" y2="105"/>
+      </g>
+      <!-- 5 nearest-neighbour dots (amber) -->
+      <g fill="#F59E0B">
+        <circle cx="113" cy="80" r="4"/>
+        <circle cx="130" cy="72" r="4"/>
+        <circle cx="107" cy="92" r="4"/>
+        <circle cx="136" cy="86" r="4"/>
+        <circle cx="118" cy="105" r="4"/>
+      </g>
+      <!-- Query vector (blue) -->
+      <circle cx="122" cy="90" r="5.5" fill="#2563EB" stroke="white" stroke-width="1.5"/>
+      <!-- Cluster labels -->
+      <text x="18" y="14" font-size="6.5" fill="#64748B"
+            font-family="Inter,sans-serif" font-weight="600">Normal</text>
+      <text x="118" y="57" font-size="6.5" fill="#64748B"
+            font-family="Inter,sans-serif" font-weight="600">Pathology</text>
+      <text x="194" y="108" font-size="6.5" fill="#64748B"
+            font-family="Inter,sans-serif" font-weight="600">Pleural</text>
+      <!-- Axis note -->
+      <text x="143" y="173" font-size="5.5" fill="#94A3B8"
+            font-family="Inter,sans-serif" text-anchor="middle">PC1</text>
+      <text x="8" y="92" font-size="5.5" fill="#94A3B8"
+            font-family="Inter,sans-serif" text-anchor="middle"
+            transform="rotate(-90,8,92)">PC2</text>
+    </svg>
+
+    <!-- Source tags -->
+    <div style="margin:1mm 2mm 0;background:#EFF6FF;border:0.25mm solid #BFDBFE;
+                border-radius:1mm;padding:1mm 1.5mm;">
+      <div style="font-size:3pt;font-weight:700;color:#1E40AF;margin-bottom:0.6mm;
+                  text-transform:uppercase;letter-spacing:0.04em;">Knowledge sources &middot; 24,460 passages</div>
+      <div style="display:flex;flex-wrap:wrap;gap:0.7mm;">
+        <span class="stag" style="background:#DBEAFE;color:#1E40AF;">MIMIC-CXR</span>
+        <span class="stag" style="background:#D1FAE5;color:#065F46;">IU-Xray / MedPix</span>
+        <span class="stag" style="background:#FEF3C7;color:#92400E;">ACR/RSNA guidelines</span>
+        <span class="stag" style="background:#EDE9FE;color:#5B21B6;">PubMedQA</span>
+        <span class="stag" style="background:#FCE7F3;color:#9D174D;">PubMed radiology</span>
+        <span class="stag" style="background:#ECFDF5;color:#064E3B;">OpenAlex</span>
+        <span class="stag" style="background:#FFF7ED;color:#9A3412;">CrossRef</span>
+        <span class="stag" style="background:#F0FDF4;color:#166534;">Europe PMC</span>
+        <span class="stag" style="background:#F8FAFC;color:#475569;border:0.2mm solid #CBD5E1;">Europe PMC full-text</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Panel 3: Retrieved Passages (124–176mm) ══ -->
+  <div style="position:absolute;top:11mm;left:124mm;width:52mm;">
+    <div class="pt">Top-5 Retrieved Passages</div>
+
+    <div style="margin-top:1mm;">
+      <div class="card" style="border-left-color:#2563EB;">
+        <span class="card-num">[1]</span>
+        <div class="card-text">"No acute cardiopulmonary process. Lungs clear bilaterally. Normal cardiac silhouette."</div>
+        <div class="card-src"><span class="stag" style="background:#DBEAFE;color:#1E40AF;">mimic-cxr</span></div>
+      </div>
+
+      <div class="card" style="border-left-color:#059669;">
+        <span class="card-num">[2]</span>
+        <div class="card-text">"Lobar consolidation with air bronchograms — radiographic criterion for pneumonia diagnosis."</div>
+        <div class="card-src"><span class="stag" style="background:#FEF3C7;color:#92400E;">guidelines</span></div>
+      </div>
+
+      <div class="card" style="border-left-color:#7C3AED;">
+        <span class="card-num">[3]</span>
+        <div class="card-text">"Bilateral perihilar infiltrates with Kerley B lines, consistent with cardiogenic oedema."</div>
+        <div class="card-src"><span class="stag" style="background:#EDE9FE;color:#5B21B6;">pubmedqa</span></div>
+      </div>
+
+      <div class="card" style="border-left-color:#D97706;">
+        <span class="card-num">[4]</span>
+        <div class="card-text">"Mild cardiomegaly. Blunting of right costophrenic angle consistent with small effusion."</div>
+        <div class="card-src"><span class="stag" style="background:#D1FAE5;color:#065F46;">medpix</span></div>
+      </div>
+
+      <div class="card" style="border-left-color:#DC2626;background:#FFF5F5;">
+        <span class="card-num" style="color:#DC2626;">[5]</span>
+        <div class="card-text">"Right lower lobe opacity. Parapneumonic effusion cannot be excluded."</div>
+        <div class="card-src">
+          <span class="stag" style="background:#FCE7F3;color:#9D174D;">pubmed-rad.</span>
+          <span class="stag" style="background:#FEE2E2;color:#991B1B;margin-left:0.5mm;">&#x26A0; adv. p=0.20</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin:0.3mm 1.5mm 0;font-size:2.7pt;color:#DC2626;
+                font-style:italic;line-height:1.3;">
+      &#x26A0; Passage [5] replaced by an adversarial snippet during Stage 2 training (p=0.20) to improve robustness against misleading evidence.
+    </div>
+  </div>
+
+  <!-- Inter-panel arrows -->
+  <svg style="position:absolute;top:0;left:0;width:176mm;height:92mm;pointer-events:none;"
+       xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="ah2" viewBox="0 0 8 8" refX="7" refY="4"
+              markerWidth="5" markerHeight="5" orient="auto">
+        <path d="M0,0 L8,4 L0,8 Z" fill="#64748B"/>
+      </marker>
+    </defs>
+    <line x1="50mm" y1="50mm" x2="53.5mm" y2="50mm"
+          stroke="#64748B" stroke-width="0.4mm" marker-end="url(#ah2)"/>
+    <line x1="122mm" y1="50mm" x2="125.5mm" y2="50mm"
+          stroke="#64748B" stroke-width="0.4mm" marker-end="url(#ah2)"/>
+  </svg>
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="leg-item">
+      <div class="leg-dot" style="background:#2563EB;"></div>
+      <span class="leg-lbl">Query vector <i>q</i></span>
+    </div>
+    <div class="leg-item">
+      <div class="leg-dot" style="background:#F59E0B;"></div>
+      <span class="leg-lbl">Top-<i>k</i> neighbours</span>
+    </div>
+    <div class="leg-item">
+      <div class="leg-dot" style="background:#94A3B8;opacity:0.7;"></div>
+      <span class="leg-lbl">Corpus passages (24,460)</span>
+    </div>
+    <div class="leg-item">
+      <div class="leg-dash"></div>
+      <span class="leg-lbl">L2 search radius</span>
+    </div>
+    <div class="leg-item">
+      <div class="leg-dot" style="background:#DC2626;border-radius:0.3mm;"></div>
+      <span class="leg-lbl">Adversarial injection (train)</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- Caption -->
+<div class="caption">
+  <span class="cap-label">Figure 5.</span>
+  <span class="cap-body">Evidence retrieval pipeline. A text description of the chest radiograph, generated by the LLaMA-3.2-3B decoder, is encoded by MiniLM-L6-v2 into a 384-dimensional query vector <i>q</i>. FAISS IndexFlatL2 identifies the five nearest passages (L2 distance) within the 24,460-entry knowledge base, which aggregates MIMIC-CXR impression sentences, Indiana University chest X-ray reports, ACR/RSNA clinical guidelines, PubMedQA contexts, and four open-access bibliographic sources. The retrieved passages are forwarded to the dual-branch classification head as contextual evidence. During Stage 2 training, the fifth retrieved passage is substituted with a semantically plausible but adversarial snippet with probability 0.20, improving model robustness to misleading evidence. The retrieval depth <i>k</i>&thinsp;=&thinsp;5 was selected by ablation over <i>k</i>&thinsp;&#8712;&thinsp;{1,&thinsp;3,&thinsp;5,&thinsp;7,&thinsp;10}.</span>
+</div>
+
+</body>
+</html>

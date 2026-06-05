@@ -84,8 +84,10 @@ class PerceiverResampler(nn.Module):
             (B, K, D_llm) in bf16, ready to splice into inputs_embeds.
         """
         B = vision_tokens.shape[0]
-        # Compute in fp32 for numerical stability, cast at the end
-        v = self.vision_norm(self.vision_proj(self.input_norm(vision_tokens.float())))  # (B, N, D)
+        # Cast input to match weight dtype (bf16 when projector is bf16, fp32 otherwise).
+        # The output is always returned as bf16 — internal precision matches weight storage.
+        wdtype = self.vision_proj.weight.dtype
+        v = self.vision_norm(self.vision_proj(self.input_norm(vision_tokens.to(wdtype))))  # (B, N, D)
         q = self.latents.unsqueeze(0).expand(B, -1, -1).contiguous()   # (B, K, D)
 
         for block in self.layers:

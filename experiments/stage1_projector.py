@@ -231,7 +231,7 @@ def train(
         num_layers=config.projector_num_layers,
     )
     vision.to(llm.device)
-    projector.to(llm.device)
+    projector.to(llm.device).to(torch.bfloat16)
     projector.train()
 
     for p in vision.parameters():

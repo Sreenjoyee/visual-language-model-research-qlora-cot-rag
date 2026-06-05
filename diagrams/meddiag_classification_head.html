@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Classification Head</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  @media screen {
+    html { zoom: 2.4; }
+    body { background: #475569; padding: 10px; display: flex;
+           flex-direction: column; align-items: flex-start; gap: 3px; }
+  }
+  @media print {
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    html { zoom: 1; }
+    @page { size: 176mm 152mm; margin: 0; }
+    body { background: white; padding: 0; display: block; }
+    .canvas  { box-shadow: none; }
+    .caption { box-shadow: none; margin-top: 0; }
+  }
+
+  /*
+    Design: horizontal strip/table layout — no fixed-height boxes,
+    no SVG inside content rows, no unicode math symbols.
+    Each layer is a horizontal band with a coloured left accent stripe.
+
+    Canvas: 176 x 112mm
+
+    Row positions (all in mm from canvas top):
+      Header:          0  – 14
+      Branch labels:  14  – 19.5
+      V-Input:       19.5 – 30.5  (h=11)   L col only
+      R-Input:       19.5 – 32.5  (h=13)   R col only  [has adv note]
+      V-Pool:        30.5 – 39.5  (h=9)    L col only
+      R-LinPool:     32.5 – 42.5  (h=10)   R col only
+      V-LN:          39.5 – 51    (h=11.5) L col only
+      R-LN:          42.5 – 51    (h=8.5)  R col only
+      Gap + merge:   51   – 52    (h=1)
+      Concat:        52   – 60.5  (h=8.5)
+      FC-1:          61   – 70    (h=9)
+      GELU+LN:       70.5 – 78.5  (h=8)
+      Dropout:       79   – 86.5  (h=7.5)
+      FC-2 + tau:    87   – 97    (h=10)
+      Output:        97.5 – 107.5 (h=10)
+      Legend:       108   – 112   (h=4)
+  */
+
+  .canvas {
+    width: 176mm; height: 115mm;
+    background: white;
+    position: relative;
+    box-shadow: 0 2px 16px rgba(0,0,0,.28);
+    font-family: 'Inter', sans-serif;
+    overflow: hidden;
+  }
+
+  /* ── header ── */
+  .hband {
+    position: absolute; top: 0; left: 0; right: 0; height: 14mm;
+    background: linear-gradient(135deg, #1E1B4B 0%, #3730A3 100%);
+    padding: 1.1mm 3.5mm;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .htitle { font-size: 6.4pt; font-weight: 700; color: #F1F5F9; line-height: 1.15; }
+  .hdesc  { font-size: 3.6pt; color: #94A3B8; margin-top: .45mm;
+            line-height: 1.4; max-width: 162mm; }
+
+  /*
+    Strip rows — each is a horizontal band.
+    .st-v  teal   (visual branch)
+    .st-r  green  (retrieval branch)
+    .st-c  slate  (concat)
+    .st-m  amber  (MLP trained)
+    .st-o  indigo (output)
+    Left accent stripe = 2.8mm via border-left.
+  */
+  .strip {
+    position: absolute;
+    overflow: hidden;
+    border-left: 2.8mm solid transparent;
+    padding: .65mm .9mm .65mm 1mm;
+  }
+  .st-v { border-left-color: #0D9488; background: #FAFEFE; }
+  .st-r { border-left-color: #16A34A; background: #FAFFFE; }
+  .st-c { border-left-color: #334155; background: #F7F9FA; }
+  .st-m { border-left-color: #D97706; background: #FEFDF8; }
+  .st-o { border-left-color: #4F46E5; background: #FAFAFE; }
+
+  /* horizontal separator between consecutive strips (same section) */
+  .sep { border-top: .15mm solid rgba(0,0,0,.07); }
+
+  /* row label (4.5pt bold, top of each strip) */
+  .rn {
+    font-size: 4.5pt; font-weight: 700; color: #0F172A;
+    line-height: 1.18; margin-bottom: .28mm;
+    font-family: 'Inter', sans-serif;
+  }
+  /* row description (3.6pt) */
+  .rd {
+    font-size: 3.6pt; color: #475569; line-height: 1.42;
+    font-family: 'Inter', sans-serif;
+  }
+  /* mono dimension / code (3.4pt JetBrains Mono) */
+  .rm {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 3.4pt; color: #64748B; line-height: 1.55;
+  }
+  /* inline shape tag */
+  .tag {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 3.1pt; font-weight: 600;
+    padding: .05mm .35mm; border-radius: .2mm;
+    vertical-align: middle; margin-left: .3mm;
+  }
+  .tag-v { background: #CCFBF1; color: #0F766E; }
+  .tag-r { background: #DCFCE7; color: #166534; }
+  .tag-m { background: #FEF3C7; color: #92400E; }
+  .tag-s { background: #E2E8F0; color: #334155; }
+  .tag-o { background: #EDE9FE; color: #4C1D95; }
+
+  /* adversarial callout (inside RAG input strip) */
+  .adv {
+    margin-top: .5mm;
+    padding: .4mm .6mm;
+    background: #FFF1F2; border-left: 1.5mm solid #E11D48;
+    border-radius: .2mm;
+  }
+  .adv-lbl {
+    font-size: 3.2pt; font-weight: 700; color: #9F1239; letter-spacing: .15pt;
+    text-transform: uppercase; font-family: 'Inter', sans-serif;
+  }
+  .adv-txt {
+    font-size: 3.3pt; color: #64748B; line-height: 1.42;
+    font-family: 'Inter', sans-serif; margin-top: .12mm;
+  }
+
+  /* temperature callout (inside FC-2 strip) */
+  .tau-box {
+    margin-top: .45mm;
+    padding: .35mm .6mm;
+    background: #EDE9FE; border-left: 1.5mm solid #7C3AED;
+    border-radius: .2mm;
+  }
+  .tau-lbl {
+    font-size: 3.1pt; font-weight: 700; color: #5B21B6; letter-spacing: .12pt;
+    text-transform: uppercase; font-family: 'Inter', sans-serif;
+  }
+  .tau-txt {
+    font-size: 3.3pt; color: #64748B; line-height: 1.42;
+    font-family: 'Inter', sans-serif; margin-top: .1mm;
+  }
+
+  /* output decision pills */
+  .pill {
+    display: inline-flex; align-items: center; gap: .8mm;
+    padding: .3mm .9mm; border-radius: .4mm; margin-top: .45mm;
+    font-family: 'Inter', sans-serif;
+  }
+  .pill-n { background: #DCFCE7; border: .2mm solid #16A34A; }
+  .pill-a { background: #FEE2E2; border: .2mm solid #DC2626; }
+
+  /* legend */
+  .legend { position: absolute; display: flex; gap: 1.8mm 2.5mm;
+            align-items: center; flex-wrap: wrap; }
+  .li { display: flex; align-items: center; gap: .4mm;
+        font-size: 3.1pt; color: #475569; font-family: 'Inter', sans-serif; }
+  .lb { width: 2.5mm; height: 2mm; flex-shrink: 0; }
+
+  /* caption */
+  .caption {
+    width: 176mm; font-family: 'Inter', sans-serif;
+    font-size: 4.3pt; color: #374151; line-height: 1.55;
+    margin-top: 1.2mm; background: white; padding: 2mm 3mm;
+    box-shadow: 0 1px 6px rgba(0,0,0,.14);
+  }
+</style>
+</head>
+<body>
+
+<div class="canvas">
+
+  <!-- ══ HEADER ══ -->
+  <div class="hband">
+    <div class="htitle">Classification Head: Dual-Branch MLP with Learnable Temperature Calibration</div>
+    <div class="hdesc">Visual latent tokens and retrieved passage embeddings are encoded through independent normalisation branches, concatenated, and passed through a four-layer MLP. Logits are divided by a learnable temperature scalar trained end-to-end. During Stage 2, 20% of retrieved passages are replaced with adversarial snippets to reduce susceptibility to misleading retrieved evidence.</div>
+  </div>
+
+  <!-- ══ BRANCH COLUMN HEADERS (14–19.5mm) ══ -->
+  <!-- Left: Visual -->
+  <div style="position:absolute;left:0;top:14mm;width:87mm;height:5.5mm;
+              background:#0D9488;display:flex;align-items:center;
+              padding-left:3.5mm;z-index:2;">
+    <span style="font-size:4pt;font-weight:700;letter-spacing:.5pt;
+                 text-transform:uppercase;color:white;
+                 font-family:'Inter',sans-serif;">Visual Branch</span>
+    <span style="font-size:3pt;color:rgba(255,255,255,.7);margin-left:2mm;
+                 font-family:'Inter',sans-serif;">
+      x<sub style="font-size:2pt;">v</sub></span>
+  </div>
+  <!-- Right: Retrieval -->
+  <div style="position:absolute;left:89mm;top:14mm;width:87mm;height:5.5mm;
+              background:#16A34A;display:flex;align-items:center;
+              padding-left:3.5mm;z-index:2;">
+    <span style="font-size:4pt;font-weight:700;letter-spacing:.5pt;
+                 text-transform:uppercase;color:white;
+                 font-family:'Inter',sans-serif;">Retrieval Branch</span>
+    <span style="font-size:3pt;color:rgba(255,255,255,.7);margin-left:2mm;
+                 font-family:'Inter',sans-serif;">
+      x<sub style="font-size:2pt;">r</sub></span>
+  </div>
+  <!-- Centre divider (spans branch section 14–51mm) -->
+  <div style="position:absolute;left:87.5mm;top:14mm;height:37mm;
+              width:.22mm;background:#CBD5E1;z-index:3;"></div>
+  <!-- Gap at 87–89mm between columns -->
+  <div style="position:absolute;left:87mm;top:14mm;width:2mm;height:37mm;
+              background:white;z-index:2;"></div>
+
+  <!-- ══ VISUAL BRANCH STRIPS ══ -->
+
+  <!-- V-Input  19.5–30.5mm -->
+  <div class="strip st-v" style="left:0;top:19.5mm;width:87mm;height:11mm;">
+    <div class="rn">Input Representation
+      <span class="tag tag-v">(B, 8, 3072)</span>
+    </div>
+    <div class="rd">K = 8 latent queries output by the Perceiver Resampler, each of
+      dimensionality d = 3,072 (LLM embedding space).</div>
+    <div class="rm">perceiver_out : Tensor  shape (B, 8, 3072)</div>
+  </div>
+
+  <!-- V-Pool  30.5–39.5mm -->
+  <div class="strip st-v sep" style="left:0;top:30.5mm;width:87mm;height:9mm;">
+    <div class="rn">Global Mean Pooling
+      <span class="tag tag-v">(B, 3072)</span>
+    </div>
+    <div class="rm">vis = perceiver_out.float().mean(dim=1)</div>
+    <div class="rd">Reduces K = 8 token dimension; produces a single visual
+      summary vector per sample.</div>
+  </div>
+
+  <!-- V-LayerNorm  39.5–51mm -->
+  <div class="strip st-v sep" style="left:0;top:39.5mm;width:87mm;height:11.5mm;">
+    <div class="rn">Independent Layer Normalisation
+      <span class="tag tag-v">(B, 3072)</span>
+    </div>
+    <div class="rm">self.vis_norm = nn.LayerNorm(3072)</div>
+    <div class="rd">Normalises the visual branch independently of the retrieval branch.
+      Learnable affine parameters &gamma;, &beta; per channel.</div>
+    <div class="rm" style="margin-top:.3mm;">vis = self.vis_norm(vis)</div>
+  </div>
+
+  <!-- ══ RETRIEVAL BRANCH STRIPS ══ -->
+
+  <!-- R-Input  19.5–32.5mm -->
+  <div class="strip st-r" style="left:89mm;top:19.5mm;width:87mm;height:13mm;">
+    <div class="rn">Input Embeddings
+      <span class="tag tag-r">(B, 5, 384)</span>
+    </div>
+    <div class="rd">k = 5 passage embeddings retrieved by FAISS, encoded by
+      MiniLM-L6-v2 (d = 384). Value of k selected by ablation over {1, 3, 5, 7, 10}.</div>
+    <div class="adv">
+      <div class="adv-lbl">Stage 2 Training &mdash; Adversarial Injection (p = 0.20)</div>
+      <div class="adv-txt">With probability 0.20, the final retrieved passage is replaced by a
+        clinically plausible but contradictory adversarial snippet, improving robustness to misleading retrieved text.</div>
+    </div>
+  </div>
+
+  <!-- R-LinPool  32.5–42.5mm -->
+  <div class="strip st-r sep" style="left:89mm;top:32.5mm;width:87mm;height:10mm;">
+    <div class="rn">Linear Projection + Mean Pooling
+      <span class="tag tag-r">(B, 3072)</span>
+    </div>
+    <div class="rm">self.rag_proj = nn.Linear(384, 3072)</div>
+    <div class="rd">Projects each snippet from d = 384 to d = 3,072 to match the visual branch
+      dimensionality. Mean-pools across k = 5 passages.</div>
+    <div class="rm" style="margin-top:.25mm;">rag = self.rag_proj(rag_embeddings.float()).mean(dim=1)
+      &nbsp;&nbsp;# (B, 3072)</div>
+  </div>
+
+  <!-- R-LayerNorm  42.5–51mm -->
+  <div class="strip st-r sep" style="left:89mm;top:42.5mm;width:87mm;height:8.5mm;">
+    <div class="rn">Independent Layer Normalisation
+      <span class="tag tag-r">(B, 3072)</span>
+    </div>
+    <div class="rm">self.rag_norm = nn.LayerNorm(3072)</div>
+    <div class="rd">Normalised independently of the visual branch. Both branches output
+      (B, 3072) with matched scale before fusion.</div>
+  </div>
+
+  <!-- ══ MERGE SVG (1mm gap 51–52mm) ══ -->
+  <!--
+    Two short lines converging from each column bottom-centre to canvas centre.
+    Visual centre-x = 43.5mm; RAG centre-x = 132.5mm; concat centre-x = 88mm.
+    All at y ~ 51.5mm (midpoint of 1mm gap).
+  -->
+  <svg style="position:absolute;top:51mm;left:0;width:176mm;height:1mm;
+              overflow:visible;pointer-events:none;z-index:6;">
+    <defs>
+      <marker id="mc" markerWidth="2.2" markerHeight="2.2"
+              refX="1.8" refY="1.1" orient="auto">
+        <path d="M0,0L0,2.2L2.2,1.1z" fill="#334155"/></marker>
+    </defs>
+    <!-- left branch line: horizontal to center then short drop -->
+    <polyline points="43.5mm,0 88mm,0 88mm,1mm"
+              stroke="#94A3B8" stroke-width=".25mm" fill="none" marker-end="url(#mc)"/>
+    <!-- right branch line -->
+    <polyline points="132.5mm,0 88mm,0"
+              stroke="#94A3B8" stroke-width=".25mm" fill="none"/>
+  </svg>
+
+  <!-- ══ CONCAT STRIP  52–60.5mm ══ -->
+  <div class="strip st-c" style="left:0;top:52mm;width:176mm;height:8.5mm;
+       display:flex;align-items:center;gap:5mm;">
+    <div>
+      <div class="rn" style="color:#1E293B;">Concatenation
+        <span class="tag tag-s">(B, 6144)</span>
+      </div>
+      <div class="rm">x = torch.cat([vis, rag], dim=1)
+        &nbsp;&nbsp;# [x_v || x_r] : (B, 3072) + (B, 3072) &rarr; (B, 6144)</div>
+    </div>
+    <div style="font-size:10pt;color:#94A3B8;font-family:'Inter',sans-serif;"
+         >&equiv;</div>
+    <div class="rd" style="font-size:3.5pt;">Fused representation combining visual spatial evidence
+      and clinical literature evidence. Input to the classification MLP.</div>
+  </div>
+
+  <!-- thin rule separating concat from MLP section -->
+  <div style="position:absolute;left:0;top:60.5mm;width:176mm;
+              height:.2mm;background:#CBD5E1;"></div>
+
+  <!-- small MLP section header label -->
+  <div style="position:absolute;left:2.8mm;top:60.7mm;
+              font-size:3pt;font-weight:700;letter-spacing:.4pt;
+              text-transform:uppercase;color:#D97706;
+              font-family:'Inter',sans-serif;">
+    Classification MLP &mdash; nn.Sequential</div>
+
+  <!-- ══ MLP STRIPS ══ -->
+
+  <!-- FC-1  61–70mm -->
+  <div class="strip st-m" style="left:0;top:61mm;width:176mm;height:9mm;">
+    <div style="display:flex;gap:6mm;align-items:flex-start;">
+      <div style="min-width:55mm;">
+        <div class="rn" style="color:#92400E;">Fully-Connected Layer 1
+          <span class="tag tag-m">FC(6144, 512)</span>
+        </div>
+        <div class="rm">nn.Linear(llm_dim * 2, hidden_dim)
+          &nbsp;&nbsp;# 6144 &rarr; 512</div>
+      </div>
+      <div>
+        <div class="rd">Maps fused 6144-dim input to hidden dim = 512.
+          Weight matrix W &isin; R<sup style="font-size:2pt;">512&times;6144</sup>.</div>
+        <div class="rm" style="margin-top:.2mm;">Input: (B, 6144) &nbsp;&rarr;&nbsp; Output: (B, 512)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GELU + LN  70.5–78.5mm -->
+  <div class="strip st-m sep" style="left:0;top:70.5mm;width:176mm;height:8mm;">
+    <div style="display:flex;gap:6mm;align-items:flex-start;">
+      <div style="min-width:55mm;">
+        <div class="rn" style="color:#92400E;">GELU Activation &middot; Layer Normalisation
+          <span class="tag tag-m">(B, 512)</span>
+        </div>
+        <div class="rm">nn.GELU() &nbsp;&rarr;&nbsp; nn.LayerNorm(512)</div>
+      </div>
+      <div>
+        <div class="rd">GELU(x) = x &middot; &Phi;(x) where &Phi; is the Gaussian CDF.
+          LayerNorm applied after non-linearity for training stability.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dropout  79–86.5mm -->
+  <div class="strip st-m sep" style="left:0;top:79mm;width:176mm;height:7.5mm;">
+    <div style="display:flex;gap:6mm;align-items:flex-start;">
+      <div style="min-width:55mm;">
+        <div class="rn" style="color:#92400E;">Dropout Regularisation
+          <span class="tag tag-m">p = 0.1</span>
+        </div>
+        <div class="rm">nn.Dropout(0.1)</div>
+      </div>
+      <div class="rd">Applied during training only; identity at inference.
+        Each unit dropped independently with probability 0.1 per forward pass.</div>
+    </div>
+  </div>
+
+  <!-- FC-2 + temperature  87–99.5mm -->
+  <div class="strip st-m sep" style="left:0;top:87mm;width:176mm;height:12.5mm;">
+    <div style="display:flex;gap:6mm;align-items:flex-start;">
+      <div style="min-width:55mm;">
+        <div class="rn" style="color:#92400E;">Fully-Connected Layer 2
+          <span class="tag tag-m">FC(512, 2)</span>
+        </div>
+        <div class="rm">nn.Linear(hidden_dim, 2) &nbsp;&rarr;&nbsp; (B, 2)</div>
+        <div class="tau-box">
+          <div class="tau-lbl">Learnable Temperature &tau;</div>
+          <div class="tau-txt">logits / self.temperature.clamp(min=0.1) &nbsp;&middot;&nbsp;
+            &tau; = nn.Parameter(ones(1)); &tau;<sub style="font-size:2pt;">0</sub> = 1.0
+            &nbsp;&middot;&nbsp; Trained end-to-end; improves calibration without post-hoc scaling</div>
+        </div>
+      </div>
+      <div>
+        <div class="rd">Produces two raw logits: index 0 = NORMAL, index 1 = ABNORMAL.
+          Dividing by &tau; rescales the logit surface without altering the decision
+          boundary, reducing expected calibration error (ECE).</div>
+        <div class="rm" style="margin-top:.3mm;">(B, 512) &rarr; logits (B, 2)
+          &rarr; logits / &tau;.clamp(min=0.1)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ OUTPUT STRIP  100–110mm ══ -->
+  <div class="strip st-o" style="left:0;top:100mm;width:176mm;height:10mm;">
+    <div style="display:flex;gap:5mm;align-items:center;">
+      <div style="min-width:62mm;">
+        <div class="rn" style="color:#3730A3;">Softmax &rarr; Calibrated Probabilities
+          <span class="tag tag-o">(B, 2)</span>
+        </div>
+        <div class="rm">p_hat = softmax(logits / tau)
+          &nbsp;&nbsp;# applied at inference</div>
+        <div class="rd" style="margin-top:.2mm;">
+          Decision threshold &tau;* = argmax(TPR &minus; FPR) on held-out validation ROC
+          (Youden-J statistic)</div>
+      </div>
+      <div style="display:flex;gap:3mm;flex-wrap:wrap;">
+        <div class="pill pill-n">
+          <span style="font-size:4.8pt;font-weight:700;color:#15803D;
+                       font-family:'Inter',sans-serif;">NORMAL</span>
+          <span style="font-size:3.1pt;color:#64748B;
+                       font-family:'JetBrains Mono',monospace;">p_hat[0] &gt; tau*</span>
+        </div>
+        <div class="pill pill-a">
+          <span style="font-size:4.8pt;font-weight:700;color:#DC2626;
+                       font-family:'Inter',sans-serif;">ABNORMAL</span>
+          <span style="font-size:3.1pt;color:#64748B;
+                       font-family:'JetBrains Mono',monospace;">p_hat[1] &gt; tau*</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ LEGEND  110.5–115mm ══ -->
+  <div class="legend" style="left:2.5mm;top:110.5mm;">
+    <div class="li">
+      <div class="lb" style="background:#0D9488;"></div>
+      Visual branch</div>
+    <div class="li">
+      <div class="lb" style="background:#16A34A;"></div>
+      Retrieval branch</div>
+    <div class="li">
+      <div class="lb" style="background:#334155;"></div>
+      Feature concatenation</div>
+    <div class="li">
+      <div class="lb" style="background:#D97706;"></div>
+      Classification MLP (trained)</div>
+    <div class="li">
+      <div class="lb" style="background:#4F46E5;"></div>
+      Output + calibration</div>
+    <div class="li">
+      <div class="lb"
+           style="background:#FFF1F2;border-left:1.5mm solid #E11D48;"></div>
+      Adversarial injection (training only)</div>
+    <div class="li">
+      <div class="lb"
+           style="background:#EDE9FE;border-left:1.5mm solid #7C3AED;"></div>
+      Learnable temperature &tau;</div>
+  </div>
+
+</div><!-- /canvas -->
+
+<!-- ══ CAPTION ══ -->
+<div class="caption">
+  <strong>Fig. 3.</strong>
+  Architecture of the dual-branch classification head.
+  (<strong>Visual branch</strong>) The K = 8 Perceiver output tokens
+  (B &times; 8 &times; 3,072) are globally mean-pooled and independently layer-normalised
+  (vis_norm) to yield a single visual summary vector.
+  (<strong>Retrieval branch</strong>) The k = 5 passage embeddings
+  (B &times; 5 &times; 384) are linearly projected to d = 3,072, mean-pooled across passages,
+  and independently layer-normalised (rag_norm). During Stage 2 training, with probability
+  p = 0.20 the final retrieved passage is replaced by an adversarial snippet to prevent
+  misleading retrieved evidence.
+  (<strong>Fusion MLP</strong>) Both branch outputs are concatenated to form a
+  B &times; 6,144 fused representation and passed through
+  Linear(6144, 512) &rarr; GELU &rarr; LayerNorm(512) &rarr; Dropout(0.1) &rarr; Linear(512, 2).
+  Raw logits are divided by a learnable temperature scalar &tau; (initialised to 1.0, clamped
+  &ge; 0.1) trained end-to-end to minimise expected calibration error.
+  The binary decision threshold &tau;* is set to the Youden-J optimum on the held-out
+  validation ROC curve.
+</div>
+
+</body>
+</html>

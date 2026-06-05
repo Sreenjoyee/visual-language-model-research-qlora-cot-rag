@@ -92,7 +92,7 @@ class MeddiagPipeline:
             # (input_norm.weight/bias) initialise to identity, which is correct.
             self.projector.load_state_dict(state, strict=False)
         # Even pre-training, move projector to the LLM's device so splicing works.
-        self.projector.to(self.llm.device)
+        self.projector.to(self.llm.device).to(torch.bfloat16)
         self.vision.to(self.llm.device)
         self.projector.eval()
 

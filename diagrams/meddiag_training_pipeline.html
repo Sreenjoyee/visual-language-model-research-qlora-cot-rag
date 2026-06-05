@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Training Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  @media screen {
+    html { zoom: 2.4; }
+    body { background: #475569; padding: 10px; display: flex;
+           flex-direction: column; align-items: flex-start; gap: 3px; }
+  }
+  @media print {
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    html { zoom: 1; }
+    @page { size: 176mm 125mm; margin: 0; }
+    body { background: white; padding: 0; display: block; }
+    .canvas  { box-shadow: none; }
+    .caption { box-shadow: none; margin-top: 0; }
+  }
+
+  /*
+    Layout (mm from canvas TL):
+      Header:        0 – 15
+      Stage 1 row:  15 – 52   (h=37)
+        Boxes:      16.5 – 50.5  (h=34)
+      Checkpoint:   52 – 58   (h=6)
+      Stage 2 row:  58 – 101  (h=43)
+        Boxes:      59.5 – 87.5  (h=28)
+        FAISS:      89.5 – 98.5  (h=9)
+      Img PH:      100 – 108
+      Legend:      109 – 114
+      Canvas:      115mm
+
+    Component x-centres (consistent across both rows):
+      Stage label: 0–11
+      Input:       11–27   (w=16)
+      EfficientNet:31–56   (w=25)   gap=4
+      Perceiver:   60–85   (w=25)   gap=4
+      LLaMA:       89–114  (w=25)   gap=4
+      ClassHead:  118–141  (w=23)   gap=4  (Stage 2 only)
+      Loss/Obj:   145–174  (w=29)
+
+    Arrow mid-y  S1: 16.5+17 = 33.5mm
+    Arrow mid-y  S2: 59.5+14 = 73.5mm
+  */
+
+  .canvas {
+    width: 176mm; height: 88mm;
+    background: #F8FAFC;
+    position: relative; overflow: hidden;
+    box-shadow: 0 2px 16px rgba(0,0,0,.28);
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* ── header ── */
+  .hband {
+    position: absolute; top: 0; left: 0; right: 0; height: 15mm;
+    background: linear-gradient(135deg, #064E3B 0%, #065F46 100%);
+    padding: 1.2mm 3.5mm;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .htitle { font-size: 6.4pt; font-weight: 700; color: #F1F5F9; line-height: 1.15; }
+  .hdesc  { font-size: 3.6pt; color: #94A3B8; margin-top: .5mm;
+            line-height: 1.4; max-width: 162mm; }
+
+  /* ── boxes ── */
+  .box {
+    position: absolute; border-radius: .85mm;
+    overflow: visible; z-index: 2; padding: .75mm .9mm;
+  }
+  .fr { background: #F0FDFA; border: .28mm solid #0D9488; }
+  .tr { background: #FFFBEB; border: .28mm solid #D97706; }
+  .ld { background: #EFF6FF; border: .28mm solid #3B82F6; }
+  .ob { background: #F1F5F9; border: .28mm solid #64748B; }
+  .kb { background: #F0FDF4; border: .25mm dashed #16A34A; }
+  .ph { background: #FAFAFA; border: .22mm dashed #94A3B8; border-radius: .6mm; }
+
+  /* ── gradient-status badge ── */
+  .bdg {
+    display: block; font-size: 2.4pt; font-weight: 700; letter-spacing: .05pt;
+    padding: .1mm .48mm; border-radius: .25mm; margin-bottom: .32mm;
+    font-family: 'Inter', sans-serif; white-space: nowrap; width: fit-content;
+  }
+  .b-fr { background: #CCFBF1; color: #0F766E; }
+  .b-tr { background: #FEF3C7; color: #92400E; }
+  .b-ld { background: #DBEAFE; color: #1E40AF; }
+  .b-kb { background: #DCFCE7; color: #166534; }
+
+  /* ── typography ── */
+  .bt { font-size: 5.0pt; font-weight: 700; color: #0F172A;
+        line-height: 1.18; margin-bottom: .28mm; }
+  .bs { font-size: 3.5pt; color: #475569; line-height: 1.42; }
+  .bm { font-family: 'JetBrains Mono', monospace;
+        font-size: 3.3pt; color: #64748B; line-height: 1.58; }
+  .t  { font-family: 'JetBrains Mono', monospace; font-size: 3.3pt; line-height: 1.58; }
+  .t-t { color: #0D6E68; font-weight: 500; }
+  .t-a { color: #B45309; font-weight: 500; }
+  .t-b { color: #1D4ED8; font-weight: 500; }
+
+  .sl {
+    display: block; font-size: 3.1pt; font-weight: 700; letter-spacing: .33pt;
+    text-transform: uppercase; margin: .38mm 0 .1mm;
+    font-family: 'Inter', sans-serif;
+  }
+  .sl-t { color: #0D9488; } .sl-a { color: #D97706; }
+  .sl-b { color: #1D4ED8; } .sl-g { color: #16A34A; }
+
+  .hr { border-top: .15mm solid rgba(0,0,0,.08); margin: .36mm 0; }
+
+  /* ── legend ── */
+  .legend { position: absolute; display: flex; gap: 1.6mm 2.2mm;
+            align-items: center; flex-wrap: wrap; }
+  .li { display: flex; align-items: center; gap: .4mm;
+        font-size: 3.1pt; color: #475569; font-family: 'Inter', sans-serif; }
+  .lb { width: 2mm; height: 2mm; border-radius: .25mm; flex-shrink: 0; }
+
+  /* ── caption ── */
+  .caption {
+    width: 176mm; font-family: 'Inter', sans-serif;
+    font-size: 4.3pt; color: #374151; line-height: 1.55;
+    margin-top: 1.2mm; background: white; padding: 2mm 3mm;
+    box-shadow: 0 1px 6px rgba(0,0,0,.14);
+  }
+</style>
+</head>
+<body>
+
+<div class="canvas">
+
+  <!-- ══ HEADER ══ -->
+  <div class="hband">
+    <div class="htitle">Two-Stage Training Pipeline: Projector Alignment and Joint Diagnostic Fine-tuning</div>
+    <div class="hdesc">Stage 1 trains the Perceiver Resampler in isolation under a language modelling objective; all other parameters are frozen. Stage 2 loads the Stage 1 projector checkpoint, freezes it, and jointly optimises LoRA adapters on the language model and a dual-branch classification head under a composite diagnostic loss conditioned on FAISS-retrieved clinical evidence.</div>
+  </div>
+
+  <!-- ══ STAGE 1 BAND  15–45mm ══ -->
+  <div style="position:absolute;top:15mm;left:0;right:0;height:30mm;
+              background:rgba(240,253,250,.38);
+              border-bottom:.2mm solid rgba(13,148,136,.3);">
+    <!-- left label strip -->
+    <div style="position:absolute;left:0;top:0;bottom:0;width:11mm;
+                background:rgba(204,251,241,.5);
+                border-right:.2mm solid rgba(13,148,136,.3);
+                display:flex;flex-direction:column;
+                align-items:center;justify-content:center;gap:.6mm;">
+      <span style="font-size:3.4pt;font-weight:700;letter-spacing:.38pt;
+                   text-transform:uppercase;writing-mode:vertical-lr;
+                   transform:rotate(180deg);color:#0F766E;
+                   font-family:'Inter',sans-serif;">Stage 1</span>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:2.8pt;color:#64748B;">
+        &#8466;<sub style="font-size:2pt;">lm</sub>
+      </span>
+    </div>
+  </div>
+
+  <!-- ══ STAGE 2 BAND  58–83mm ══ -->
+  <div style="position:absolute;top:58mm;left:0;right:0;height:25mm;
+              background:rgba(255,251,235,.38);
+              border-bottom:.2mm solid rgba(217,119,6,.28);">
+    <div style="position:absolute;left:0;top:0;bottom:0;width:11mm;
+                background:rgba(253,243,199,.5);
+                border-right:.2mm solid rgba(217,119,6,.28);
+                display:flex;flex-direction:column;
+                align-items:center;justify-content:center;gap:.6mm;">
+      <span style="font-size:3.4pt;font-weight:700;letter-spacing:.38pt;
+                   text-transform:uppercase;writing-mode:vertical-lr;
+                   transform:rotate(180deg);color:#92400E;
+                   font-family:'Inter',sans-serif;">Stage 2</span>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:2.8pt;color:#64748B;">
+        &#8466;<sub style="font-size:2pt;">S2</sub>
+      </span>
+    </div>
+  </div>
+
+  <!-- ══ CHECKPOINT ZONE LABEL  52–58mm ══ -->
+  <div style="position:absolute;left:55mm;top:53.2mm;z-index:6;
+              font-size:2.7pt;color:#3B82F6;font-weight:600;letter-spacing:.12pt;
+              font-family:'Inter',sans-serif;white-space:nowrap;">
+    Checkpoint transferred: <code style="font-size:2.5pt;">models/projector_stage1.pt</code>
+  </div>
+
+
+  <!-- ══════════ STAGE 1 BOXES  (top=16.5  h=34) ══════════ -->
+
+  <!-- S1 Input  x=11  w=16 -->
+  <div class="box fr" style="left:11mm;top:16.5mm;width:16mm;height:28mm;">
+    <div class="bt" style="color:#0F766E;font-size:4.8pt;">Input</div>
+    <div style="width:100%;height:19mm;margin:.3mm 0;background:#020617;
+                border-radius:.4mm;overflow:hidden;border:.18mm solid #1E293B;
+                display:flex;align-items:center;justify-content:center;">
+      <img src="../sample_xray.jpg" alt="PA chest radiograph"
+           style="display:block;max-width:100%;max-height:19mm;
+                  object-fit:contain;image-rendering:crisp-edges;"/>
+    </div>
+    <div class="bm">PA · 224×224 px</div>
+    <div class="bm">3-channel RGB</div>
+  </div>
+
+  <!-- S1 EfficientNet  x=31  w=25 -->
+  <div class="box fr" style="left:31mm;top:16.5mm;width:25mm;height:28mm;">
+    <span class="bdg b-fr">∇ = 0 · FROZEN</span>
+    <div class="bt" style="color:#0F766E;">EfficientNet-B0</div>
+    <div class="bs">Frozen CNN; weights unchanged across all stages.</div>
+    <div class="hr"></div>
+    <span class="sl sl-t">Parameters</span>
+    <div class="bm">5.3 M non-trainable</div>
+    <div class="bm">ImageNet-1K pretrained</div>
+    <div class="hr"></div>
+    <span class="sl sl-t">Dimensions</span>
+    <div class="t t-t">(B,3,224,224)</div>
+    <div class="t t-t">&#8594; (B,49,1280)</div>
+  </div>
+
+  <!-- S1 Perceiver TRAINED  x=60  w=25 -->
+  <div class="box tr" style="left:60mm;top:16.5mm;width:25mm;height:28mm;">
+    <span class="bdg b-tr">&#8711; &#8800; 0 · SOLE TRAINABLE</span>
+    <div class="bt" style="color:#92400E;">Perceiver Resampler</div>
+    <div class="bs">The sole trainable module in Stage 1; learns to compress visual features into the LLM embedding space.</div>
+    <div class="hr"></div>
+    <span class="sl sl-a">Architecture</span>
+    <div class="bm">2 layers · 8 attn. heads</div>
+    <div class="bm">Output dim: 3,072</div>
+    <div class="hr"></div>
+    <span class="sl sl-a">Compression</span>
+    <div class="t t-a">(B,49,1280)</div>
+    <div class="t t-a">&#8594; (B,8,3072)</div>
+  </div>
+
+  <!-- S1 LLaMA FROZEN  x=89  w=25 -->
+  <div class="box fr" style="left:89mm;top:16.5mm;width:25mm;height:28mm;">
+    <span class="bdg b-fr">∇ = 0 · FROZEN · no LoRA</span>
+    <div class="bt" style="color:#0F766E;">LLaMA-3.2-3B</div>
+    <div class="bs">Decoder LLM without LoRA adapters; processes visual tokens and generates radiology report text.</div>
+    <div class="hr"></div>
+    <span class="sl sl-t">Input Context</span>
+    <div class="bm">8 visual tokens (B,8,3072)</div>
+    <div class="bm">+ text prompt</div>
+    <div class="hr"></div>
+    <span class="sl sl-t">Generates</span>
+    <div class="bm">Next-token logits over</div>
+    <div class="bm">report vocabulary</div>
+  </div>
+
+  <!-- S1 Objective  x=145  w=29 -->
+  <div class="box ob" style="left:145mm;top:16.5mm;width:29mm;height:28mm;
+       display:flex;flex-direction:column;justify-content:center;
+       align-items:center;text-align:center;">
+    <div style="font-size:4.6pt;font-weight:700;color:#334155;margin-bottom:.5mm;">
+      Objective — Stage 1</div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:5.4pt;
+                color:#0D9488;font-weight:600;margin-bottom:.5mm;">
+      &#8466;<sub style="font-size:3pt;">S1</sub> = &#8466;<sub style="font-size:3pt;">lm</sub>
+    </div>
+    <div class="bm">Cross-entropy on<br>report tokens</div>
+    <div class="hr" style="width:80%;"></div>
+    <div class="bm">AdamW &nbsp;·&nbsp;
+      lr=1&times;10<sup style="font-size:2pt;">&minus;4</sup></div>
+    <div class="bm">Warmup: 50 steps</div>
+    <div class="bm" style="color:#0D9488;margin-top:.3mm;font-weight:500;">
+      &#x2713; Saves projector_s1.pt</div>
+  </div>
+
+
+  <!-- ══════════ STAGE 2 BOXES  (top=59.5  h=28) ══════════ -->
+
+  <!-- S2 Input  x=11  w=16 -->
+  <div class="box fr" style="left:11mm;top:59.5mm;width:16mm;height:22mm;">
+    <div class="bt" style="color:#0F766E;font-size:4.8pt;">Input</div>
+    <div style="width:100%;height:11mm;margin:.3mm 0;background:#020617;
+                border-radius:.4mm;overflow:hidden;border:.18mm solid #1E293B;
+                display:flex;align-items:center;justify-content:center;">
+      <img src="../sample_xray.jpg" alt="PA chest radiograph"
+           style="display:block;max-width:100%;max-height:11mm;
+                  object-fit:contain;image-rendering:crisp-edges;"/>
+    </div>
+    <div class="bm">PA · 224×224 px</div>
+    <div class="bm">3-channel RGB</div>
+  </div>
+
+  <!-- S2 EfficientNet FROZEN compact  x=31  w=25 -->
+  <div class="box fr" style="left:31mm;top:59.5mm;width:25mm;height:22mm;">
+    <span class="bdg b-fr">∇ = 0 · FROZEN</span>
+    <div class="bt" style="color:#0F766E;">EfficientNet-B0</div>
+    <div class="bs">Unchanged from Stage 1; no gradient updates in Stage 2.</div>
+    <div class="hr"></div>
+    <div class="t t-t">(B,3,224,224)</div>
+    <div class="t t-t">&#8594; (B,49,1280)</div>
+    <div class="hr"></div>
+    <div class="bm" style="color:#0F766E;">5.3 M · non-trainable</div>
+  </div>
+
+  <!-- S2 Perceiver LOADED FROM S1  x=60  w=25 -->
+  <div class="box ld" style="left:60mm;top:59.5mm;width:25mm;height:22mm;">
+    <span class="bdg b-ld">∇ = 0 · LOADED S1 · FROZEN</span>
+    <div class="bt" style="color:#1E40AF;">Perceiver Resampler</div>
+    <div class="bs">Weights from Stage 1 checkpoint; frozen in Stage 2.</div>
+    <div class="hr"></div>
+    <span class="sl sl-b">Output</span>
+    <div class="t t-b">(B,49,1280)</div>
+    <div class="t t-b">&#8594; (B,8,3072)</div>
+    <div class="bm" style="margin-top:.35mm;color:#1D4ED8;">2 layers · 8 heads</div>
+  </div>
+
+  <!-- S2 LLaMA + LoRA TRAINED  x=89  w=25 -->
+  <div class="box tr" style="left:89mm;top:59.5mm;width:25mm;height:22mm;">
+    <span class="bdg b-tr">∇ ≠ 0 · LoRA TRAINED</span>
+    <div class="bt" style="color:#92400E;">LLaMA-3.2-3B<br>+ LoRA Adapters</div>
+    <div class="bs">Adapters on q,k,v,o proj. Base weights frozen (4-bit NF4).</div>
+    <div class="hr"></div>
+    <span class="sl sl-a">LoRA Config</span>
+    <div class="bm">r=16 · &#945;=32 · drop=0.05</div>
+    <div class="bm">~2.4 M trainable</div>
+    <div class="bm">4-step CoT output</div>
+    <div class="bm" style="color:#16A34A;">FAISS k=5 (24,460 passages)</div>
+  </div>
+
+  <!-- S2 ClassHead TRAINED  x=118  w=23 -->
+  <div class="box tr" style="left:118mm;top:59.5mm;width:23mm;height:22mm;">
+    <span class="bdg b-tr">∇ ≠ 0 · TRAINED</span>
+    <div class="bt" style="color:#92400E;">Classification<br>Head</div>
+    <div class="bs">Dual-branch MLP; logits scaled by learnable &tau;. 20% of passages replaced adversarially.</div>
+    <div class="hr"></div>
+    <div class="bm">[x<sub style="font-size:2pt;">v</sub>&#8214;x<sub style="font-size:2pt;">r</sub>]&#8594;FC(6144,512)</div>
+    <div class="bm">&#8594; GELU &#8594; FC(512,2)/&#964;</div>
+    <div class="bm">p&#770;=softmax(&#183;/&#964;)</div>
+  </div>
+
+  <!-- S2 Objective  x=145  w=29 -->
+  <div class="box ob" style="left:145mm;top:59.5mm;width:29mm;height:22mm;
+       display:flex;flex-direction:column;justify-content:center;
+       align-items:center;text-align:center;">
+    <div style="font-size:4.6pt;font-weight:700;color:#334155;margin-bottom:.5mm;">
+      Objective — Stage 2</div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:4.8pt;
+                color:#92400E;font-weight:600;line-height:1.4;margin-bottom:.4mm;">
+      &#8466;<sub style="font-size:2.8pt;">S2</sub>=0.65&#8466;<sub style="font-size:2.8pt;">cls</sub><br>
+      &nbsp;&nbsp;&nbsp;+0.35&#8466;<sub style="font-size:2.8pt;">lm</sub>
+    </div>
+    <div class="hr" style="width:80%;"></div>
+    <div class="bm">AdamW &nbsp;·&nbsp;
+      lr=2&times;10<sup style="font-size:2pt;">&minus;4</sup></div>
+    <div class="bm">7,500 steps · accum=8</div>
+    <div class="bm">Save every 250 steps</div>
+  </div>
+
+  <!-- FAISS note moved inline into LLaMA+LoRA box -->
+
+  <!-- ══ LEGEND  100–104mm ══ -->
+  <div class="legend" style="left:2.5mm;top:83mm;">
+    <div class="li">
+      <div class="lb" style="background:#F0FDFA;border:.25mm solid #0D9488;"></div>
+      Frozen (&#8711;=0)</div>
+    <div class="li">
+      <div class="lb" style="background:#FFFBEB;border:.25mm solid #D97706;"></div>
+      Trained (&#8711;&#8800;0)</div>
+    <div class="li">
+      <div class="lb" style="background:#EFF6FF;border:.25mm solid #3B82F6;"></div>
+      Loaded from Stage 1 · frozen in Stage 2</div>
+    <div class="li">
+      <div class="lb" style="background:#F0FDF4;border:.22mm dashed #16A34A;"></div>
+      External knowledge base</div>
+    <div class="li" style="margin-left:1.5mm;">
+      <svg width="5.5mm" height="1.4mm" style="overflow:visible;"><defs>
+        <marker id="la" markerWidth="2" markerHeight="2" refX="1.8" refY="1" orient="auto">
+          <path d="M0,0L0,2L2,1z" fill="#334155"/></marker></defs>
+        <line x1="0" y1=".7mm" x2="5.2mm" y2=".7mm"
+              stroke="#334155" stroke-width=".3mm" marker-end="url(#la)"/>
+      </svg>Data flow</div>
+    <div class="li">
+      <svg width="5.5mm" height="1.4mm" style="overflow:visible;"><defs>
+        <marker id="lb" markerWidth="2" markerHeight="2" refX="1.8" refY="1" orient="auto">
+          <path d="M0,0L0,2L2,1z" fill="#3B82F6"/></marker></defs>
+        <line x1="0" y1=".7mm" x2="5.2mm" y2=".7mm" stroke="#3B82F6"
+              stroke-width=".28mm" stroke-dasharray=".85mm,.48mm" marker-end="url(#lb)"/>
+      </svg>Checkpoint transfer</div>
+    <div class="li">
+      <svg width="5.5mm" height="1.4mm" style="overflow:visible;"><defs>
+        <marker id="lg" markerWidth="2" markerHeight="2" refX="1.8" refY="1" orient="auto">
+          <path d="M0,0L0,2L2,1z" fill="#16A34A"/></marker></defs>
+        <line x1="0" y1=".7mm" x2="5.2mm" y2=".7mm" stroke="#16A34A"
+              stroke-width=".28mm" stroke-dasharray=".85mm,.48mm" marker-end="url(#lg)"/>
+      </svg>FAISS retrieval</div>
+  </div>
+
+  <!-- ══ ARROWS ══ -->
+  <svg style="position:absolute;top:0;left:0;width:176mm;height:88mm;
+              pointer-events:none;overflow:visible;z-index:5;">
+    <defs>
+      <marker id="a"  markerWidth="2.4" markerHeight="2.4"
+              refX="2" refY="1.2" orient="auto">
+        <path d="M0,0 L0,2.4 L2.4,1.2z" fill="#334155"/></marker>
+      <marker id="ab" markerWidth="2.4" markerHeight="2.4"
+              refX="2" refY="1.2" orient="auto">
+        <path d="M0,0 L0,2.4 L2.4,1.2z" fill="#3B82F6"/></marker>
+      <marker id="ag" markerWidth="2.4" markerHeight="2.4"
+              refX="2" refY="1.2" orient="auto">
+        <path d="M0,0 L0,2.4 L2.4,1.2z" fill="#16A34A"/></marker>
+    </defs>
+
+    <!-- ── Stage 1 horizontal flow  (y=30.5mm — centre of h=28 boxes at 16.5mm) ── -->
+    <line x1="27mm"  y1="30.5mm" x2="30.5mm" y2="30.5mm"
+          stroke="#334155" stroke-width=".32mm" marker-end="url(#a)"/>
+    <line x1="56mm"  y1="30.5mm" x2="59.5mm" y2="30.5mm"
+          stroke="#334155" stroke-width=".32mm" marker-end="url(#a)"/>
+    <line x1="85mm"  y1="30.5mm" x2="88.5mm" y2="30.5mm"
+          stroke="#334155" stroke-width=".32mm" marker-end="url(#a)"/>
+    <!-- LLaMA → Objective (ClassHead absent in Stage 1) -->
+    <line x1="114mm" y1="30.5mm" x2="144.5mm" y2="30.5mm"
+          stroke="#334155" stroke-width=".32mm" marker-end="url(#a)"/>
+
+    <!-- ── Stage 2 horizontal flow  (y=70.5mm — centre of h=22 boxes at 59.5mm) ── -->
+    <line x1="27mm"  y1="70.5mm" x2="30.5mm" y2="70.5mm"
+          stroke="#334155" stroke-width=".32mm" marker-end="url(#a)"/>
+    <line x1="56mm"  y1="70.5mm" x2="59.5mm" y2="70.5mm"
+          stroke="#334155" stroke-width=".32mm" marker-end="url(#a)"/>
+    <line x1="85mm"  y1="70.5mm" x2="88.5mm" y2="70.5mm"
+          stroke="#334155" stroke-width=".32mm" marker-end="url(#a)"/>
+    <line x1="114mm" y1="70.5mm" x2="117.5mm" y2="70.5mm"
+          stroke="#334155" stroke-width=".32mm" marker-end="url(#a)"/>
+    <line x1="141mm" y1="70.5mm" x2="144.5mm" y2="70.5mm"
+          stroke="#334155" stroke-width=".32mm" marker-end="url(#a)"/>
+
+    <!-- ── Checkpoint transfer: S1 Perceiver bottom → S2 Perceiver top ── -->
+    <!-- S1 Perceiver: top=16.5, h=28 → bottom=44.5mm; S2 top=59.5mm -->
+    <line x1="72.5mm" y1="44.5mm" x2="72.5mm" y2="59mm"
+          stroke="#3B82F6" stroke-width=".3mm"
+          stroke-dasharray=".82mm,.44mm" marker-end="url(#ab)"/>
+  </svg>
+
+</div><!-- /canvas -->
+
+<!-- ══ CAPTION ══ -->
+<div class="caption">
+  <strong>Fig. 2.</strong>
+  Two-stage training pipeline for the proposed vision-language diagnostic system.
+  (<strong>Stage 1</strong>)&thinsp;The Perceiver Resampler is the sole trainable module; the vision encoder and language model remain frozen with no LoRA adapters. Training minimises the next-token cross-entropy loss &#8466;<sub>lm</sub> over radiology report tokens, conditioning the model on 8 compressed visual tokens. The resulting checkpoint (<code style="font-size:3.5pt;">projector_stage1.pt</code>) is saved for Stage 2 initialisation.
+  (<strong>Stage 2</strong>)&thinsp;The projector is loaded from the Stage 1 checkpoint and frozen. LoRA adapters (r=16, &#945;=32, dropout=0.05) are injected into the q,k,v,o attention projections of the language model, and a dual-branch classification head is introduced. The composite objective &#8466;<sub>S2</sub>&thinsp;=&thinsp;0.65&#8466;<sub>cls</sub>&thinsp;+&thinsp;0.35&#8466;<sub>lm</sub> jointly optimises diagnostic classification and chain-of-thought generation over 7,500 steps (AdamW, lr=2&#215;10<sup>&minus;4</sup>, gradient accumulation=8, cosine schedule). FAISS-retrieved clinical passages (k=5, selected by ablation over {1,3,5,7,10}) ground both the language model generation and the classification head during Stage 2 training, with 20% of retrieved passages replaced adversarially.
+  <em>Teal: frozen; amber: trained; blue: loaded from Stage 1 and frozen; dashed green: FAISS retrieval flow.</em>
+</div>
+
+</body>
+</html>

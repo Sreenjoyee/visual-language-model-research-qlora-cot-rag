@@ -296,7 +296,7 @@ def train(
         print("[stage2] WARNING: no projector checkpoint found — using random weights.")
 
     vision.to(llm.device)
-    projector.to(llm.device)
+    projector.to(llm.device).to(torch.bfloat16)
 
     # Freeze vision entirely — never updated
     for p in vision.parameters():
@@ -456,13 +456,13 @@ def train(
                 print(f"[stage2] step {global_step}: non-finite lm_loss, skipping")
                 continue
 
-            # Classification loss — class-weighted cross-entropy.
-            # NORMAL (index 0) gets 2× weight to counteract model drift toward
-            # ABNORMAL predictions caused by higher ABNORMAL training diversity.
+            # Classification loss — unweighted because the interleaved stream is
+            # balanced 1:1 (MIMIC alternates N/A; IU-Xray and Kermany each contribute
+            # one N and one A per MIMIC pair). Label smoothing reduces overconfidence
+            # on training examples and improves OOD calibration.
             label_tensor = torch.tensor([batch.label_id], device=llm.device)
             cls_logits = cls_head(batch.perceiver_out, batch.rag_embeddings)  # (1, 2)
-            cls_weight = torch.tensor([2.0, 1.0], device=llm.device)
-            cls_loss = F.cross_entropy(cls_logits, label_tensor, weight=cls_weight)
+            cls_loss = F.cross_entropy(cls_logits, label_tensor, label_smoothing=0.1)
 
             if not torch.isfinite(cls_loss):
                 print(f"[stage2] step {global_step}: non-finite cls_loss, skipping")

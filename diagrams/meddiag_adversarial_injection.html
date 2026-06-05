@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Adversarial Injection</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  @media screen {
+    html { zoom: 2.4; }
+    body { background: #475569; padding: 10px; display: flex;
+           flex-direction: column; align-items: flex-start; gap: 3px; }
+  }
+  @media print {
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    html { zoom: 1; }
+    @page { size: 176mm 130mm; margin: 0; }
+    body { background: white; padding: 0; display: block; }
+    .canvas  { box-shadow: none; }
+    .caption { box-shadow: none; margin-top: 0; }
+  }
+
+  .canvas {
+    width: 176mm; height: 92mm;
+    background: #F8FAFC;
+    position: relative;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.28);
+    font-family: 'Inter', sans-serif;
+    overflow: hidden;
+  }
+
+  .hband {
+    position: absolute; top: 0; left: 0; right: 0; height: 11mm;
+    background: linear-gradient(135deg, #4A0505 0%, #991B1B 100%);
+    display: flex; flex-direction: column; justify-content: center; padding: 0 3mm;
+  }
+  .htitle { font-size: 6pt; font-weight: 700; color: #F1F5F9; letter-spacing: 0.02em; }
+  .hsub   { font-size: 3.6pt; color: #94A3B8; margin-top: 0.4mm; line-height: 1.4; }
+
+  /* Compact passage bar — single row, coloured left stripe */
+  .pbar {
+    display: flex; align-items: baseline; gap: 1mm;
+    padding: 0.38mm 0.7mm 0.38mm 0;
+    border-left: 1mm solid; margin-bottom: 0.55mm;
+    border-radius: 0 0.4mm 0.4mm 0;
+  }
+  .pbar-ok  { border-color: #16A34A; background: #F0FDF4; }
+  .pbar-adv { border-color: #E11D48; background: #FFF1F2; }
+  .pn { font-family: 'JetBrains Mono', monospace; font-size: 3.1pt;
+        font-weight: 700; flex-shrink: 0; }
+  .pn-ok  { color: #15803D; }
+  .pn-adv { color: #BE123C; }
+  .pt { font-family: 'JetBrains Mono', monospace; font-size: 2.9pt;
+        color: #475569; line-height: 1.35; font-style: italic; }
+  .ps { font-size: 2.5pt; color: #94A3B8; font-family: 'JetBrains Mono', monospace;
+        flex-shrink: 0; }
+
+  /* Expanded adversarial card — shows full text */
+  .adv-card {
+    border: 0.25mm solid #FECDD3; border-left: 1.2mm solid #E11D48;
+    border-radius: 0 0.7mm 0.7mm 0; background: #FFF1F2;
+    padding: 0.7mm 0.8mm; margin-bottom: 0.55mm;
+  }
+  .adv-hd { font-family: 'JetBrains Mono', monospace; font-size: 3.1pt;
+             font-weight: 700; color: #BE123C; margin-bottom: 0.3mm; }
+  .adv-body { font-family: 'JetBrains Mono', monospace; font-size: 2.9pt;
+              color: #9F1239; line-height: 1.38; font-style: italic; }
+  .adv-note { font-size: 2.7pt; color: #E11D48; font-family: 'Inter', sans-serif;
+              font-weight: 600; margin-top: 0.25mm; }
+
+  /* Result box */
+  .rbox { border-radius: 0.6mm; padding: 0.7mm 0.9mm; margin-top: 1mm;
+          font-size: 3pt; line-height: 1.4; font-family: 'Inter', sans-serif; }
+  .rbox-ok  { background: #ECFDF5; border: 0.22mm solid #6EE7B7; color: #064E3B; }
+  .rbox-adv { background: #FFF5F5; border: 0.22mm solid #FCA5A5; color: #7F1D1D; }
+
+  /* Probability pill */
+  .prob { display: inline-flex; align-items: center; justify-content: center;
+          border-radius: 0.8mm; padding: 0.35mm 1.3mm;
+          font-family: 'JetBrains Mono', monospace; font-size: 4.8pt; font-weight: 700; }
+
+  /* Legend */
+  .legend { position: absolute; display: flex; gap: 2.5mm; align-items: center; }
+  .li { display: flex; align-items: center; gap: 0.5mm;
+        font-size: 3pt; color: #475569; font-family: 'Inter', sans-serif; }
+  .lb { width: 2.5mm; height: 1.5mm; border-radius: 0.2mm; flex-shrink: 0; }
+
+  .caption {
+    width: 176mm; background: white; padding: 2.5mm 3mm; margin-top: 2px;
+    font-family: 'Inter', sans-serif; font-size: 4pt; color: #374151;
+    line-height: 1.55; box-shadow: 0 1px 6px rgba(0,0,0,0.14);
+  }
+  .cap-label { font-size: 4.5pt; font-weight: 700; color: #1E293B; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- Header -->
+  <div class="hband">
+    <div class="htitle">Adversarial Passage Injection: Robustness Training Against Retrieval Sycophancy</div>
+    <div class="hsub">During Stage 2 training, each example is processed in one of two modes. With probability 0.80 all five retrieved passages are genuine clinical evidence. With probability 0.20 the fifth passage is replaced by a clinically plausible but contradictory snippet, forcing the model to rely on image findings over misleading text.</div>
+  </div>
+
+  <!-- Shared FAISS retrieval bar -->
+  <div style="position:absolute;top:12mm;left:3mm;right:3mm;height:6mm;
+              background:#F1F5F9;border:0.22mm solid #CBD5E1;border-radius:0.7mm;
+              display:flex;align-items:center;padding:0 2mm;gap:2mm;">
+    <div style="font-size:3.7pt;font-weight:700;color:#334155;white-space:nowrap;">
+      FAISS IndexFlatL2 retrieves k = 5 passages (shared step)</div>
+    <div style="flex:1;height:0.18mm;background:#E2E8F0;"></div>
+    <div style="font-size:2.9pt;color:#64748B;font-family:'JetBrains Mono',monospace;white-space:nowrap;">
+      query &larr; LLaMA image description &nbsp;&middot;&nbsp; MiniLM-L6-v2 (d = 384)</div>
+  </div>
+
+  <!-- Probability branch label -->
+  <div style="position:absolute;top:19.5mm;left:0;right:0;
+              display:flex;align-items:center;justify-content:center;gap:3mm;">
+    <span class="prob" style="background:#DCFCE7;color:#15803D;border:0.22mm solid #6EE7B7;">p = 0.80</span>
+    <svg width="8mm" height="2.5mm" xmlns="http://www.w3.org/2000/svg" style="overflow:visible;">
+      <line x1="0.5mm" y1="1.25mm" x2="7.5mm" y2="1.25mm"
+            stroke="#94A3B8" stroke-width="0.25mm"/>
+      <path d="M1.2mm,0.4mm L0.2mm,1.25mm L1.2mm,2.1mm"
+            fill="none" stroke="#94A3B8" stroke-width="0.25mm"/>
+      <path d="M6.8mm,0.4mm L7.8mm,1.25mm L6.8mm,2.1mm"
+            fill="none" stroke="#94A3B8" stroke-width="0.25mm"/>
+    </svg>
+    <span class="prob" style="background:#FEE2E2;color:#9F1239;border:0.22mm solid #FCA5A5;">p = 0.20</span>
+  </div>
+
+  <!-- Column divider -->
+  <div style="position:absolute;left:87.5mm;top:23mm;bottom:5.5mm;
+              width:0.2mm;background:#CBD5E1;"></div>
+
+  <!-- Arrows from retrieval bar to column headers -->
+  <svg style="position:absolute;top:0;left:0;width:176mm;height:92mm;
+              pointer-events:none;overflow:visible;" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="mok" viewBox="0 0 6 6" refX="5" refY="3"
+              markerWidth="4" markerHeight="4" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="#16A34A"/></marker>
+      <marker id="madv" viewBox="0 0 6 6" refX="5" refY="3"
+              markerWidth="4" markerHeight="4" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="#E11D48"/></marker>
+    </defs>
+    <path d="M 44mm,18mm L 44mm,19.5mm L 25mm,19.5mm L 25mm,22.3mm"
+          stroke="#16A34A" stroke-width="0.28mm" fill="none" marker-end="url(#mok)"/>
+    <path d="M 132mm,18mm L 132mm,19.5mm L 151mm,19.5mm L 151mm,22.3mm"
+          stroke="#E11D48" stroke-width="0.28mm" fill="none" marker-end="url(#madv)"/>
+  </svg>
+
+  <!-- ══ LEFT COLUMN — Normal path (3–85mm) ══ -->
+  <div style="position:absolute;left:3mm;top:23mm;width:82mm;">
+
+    <!-- Column header -->
+    <div style="background:#ECFDF5;border:0.22mm solid #6EE7B7;border-radius:0.7mm;
+                padding:0.8mm 1.5mm;margin-bottom:1.2mm;">
+      <div style="font-size:4pt;font-weight:700;color:#065F46;text-align:center;">Normal Training Path</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:4.4pt;font-weight:700;
+                  color:#16A34A;text-align:center;margin-top:0.2mm;">All 5 passages genuine</div>
+    </div>
+
+    <!-- Passages [1]–[5]: compact bars -->
+    <div class="pbar pbar-ok">
+      <span class="pn pn-ok">[1]</span>
+      <span class="pt">"No acute cardiopulmonary process. Lungs clear bilaterally."</span>
+      <span class="ps">mimic-cxr</span>
+    </div>
+    <div class="pbar pbar-ok">
+      <span class="pn pn-ok">[2]</span>
+      <span class="pt">"Lobar consolidation with air bronchograms..."</span>
+      <span class="ps">guidelines</span>
+    </div>
+    <div class="pbar pbar-ok">
+      <span class="pn pn-ok">[3]</span>
+      <span class="pt">"Bilateral perihilar infiltrates, Kerley B lines..."</span>
+      <span class="ps">pubmedqa</span>
+    </div>
+    <div class="pbar pbar-ok">
+      <span class="pn pn-ok">[4]</span>
+      <span class="pt">"Costophrenic angle blunting — small effusion."</span>
+      <span class="ps">medpix</span>
+    </div>
+    <div class="pbar pbar-ok">
+      <span class="pn pn-ok">[5]</span>
+      <span class="pt">"Right lower lobe opacity. Effusion cannot be excluded."</span>
+      <span class="ps">pubmed-rad.</span>
+    </div>
+
+    <div class="rbox rbox-ok">
+      <strong>Training signal:</strong> model learns to cite passages [1]&ndash;[5] appropriately.
+      Standard cross-entropy gradient on EVIDENCE_USED and REASONING fields.
+    </div>
+  </div>
+
+  <!-- ══ RIGHT COLUMN — Adversarial path (91–173mm) ══ -->
+  <div style="position:absolute;left:91mm;top:23mm;width:82mm;">
+
+    <!-- Column header -->
+    <div style="background:#FFF1F2;border:0.22mm solid #FECDD3;border-radius:0.7mm;
+                padding:0.8mm 1.5mm;margin-bottom:1.2mm;">
+      <div style="font-size:4pt;font-weight:700;color:#9F1239;text-align:center;">Adversarial Training Path</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:4.4pt;font-weight:700;
+                  color:#E11D48;text-align:center;margin-top:0.2mm;">Passage [5] replaced</div>
+    </div>
+
+    <!-- Passages [1]–[4]: compact bars (identical to left) -->
+    <div class="pbar pbar-ok">
+      <span class="pn pn-ok">[1]</span>
+      <span class="pt">"No acute cardiopulmonary process. Lungs clear bilaterally."</span>
+      <span class="ps">mimic-cxr</span>
+    </div>
+    <div class="pbar pbar-ok">
+      <span class="pn pn-ok">[2]</span>
+      <span class="pt">"Lobar consolidation with air bronchograms..."</span>
+      <span class="ps">guidelines</span>
+    </div>
+    <div class="pbar pbar-ok">
+      <span class="pn pn-ok">[3]</span>
+      <span class="pt">"Bilateral perihilar infiltrates, Kerley B lines..."</span>
+      <span class="ps">pubmedqa</span>
+    </div>
+    <div class="pbar pbar-ok">
+      <span class="pn pn-ok">[4]</span>
+      <span class="pt">"Costophrenic angle blunting — small effusion."</span>
+      <span class="ps">medpix</span>
+    </div>
+
+    <!-- Adversarial passage [5] — expanded to show full injected text -->
+    <div class="adv-card">
+      <div class="adv-hd">[5] &nbsp;&#x26A0;&nbsp; ADVERSARIAL INJECTION</div>
+      <div class="adv-body">"Chest radiograph shows no acute cardiopulmonary process. Lung fields are clear. Mediastinum unremarkable."</div>
+      <div class="adv-note">&#8618; contradicts true label (ABNORMAL) &nbsp;&middot;&nbsp; inserted in place of genuine passage [5]</div>
+    </div>
+
+    <div class="rbox rbox-adv">
+      <strong>Training signal:</strong> model must predict ABNORMAL from image evidence and passages [1]&ndash;[4], overriding passage [5]. Loss penalises sycophantic agreement with the injected snippet.
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend" style="left:3mm;bottom:1.2mm;">
+    <div class="li">
+      <div class="lb" style="background:#F0FDF4;border:0.2mm solid #16A34A;border-left:1mm solid #16A34A;"></div>
+      Genuine retrieved passage</div>
+    <div class="li">
+      <div class="lb" style="background:#FFF1F2;border:0.2mm solid #FECDD3;border-left:1mm solid #E11D48;"></div>
+      Adversarial injection (p = 0.20, passage [5] only)</div>
+    <div class="li">
+      <div class="lb" style="background:#ECFDF5;border:0.2mm solid #6EE7B7;"></div>
+      Normal gradient</div>
+    <div class="li">
+      <div class="lb" style="background:#FFF5F5;border:0.2mm solid #FCA5A5;"></div>
+      Adversarial gradient</div>
+  </div>
+
+</div>
+
+<div class="caption">
+  <span class="cap-label">Figure 6.</span>
+  Adversarial passage injection mechanism used during Stage 2 training. For each training example, FAISS retrieves k = 5 evidence passages via MiniLM-L6-v2 nearest-neighbour search. With probability 0.80 (left), all five passages are genuine clinical text and the model is trained to cite and reason from the evidence in the standard manner. With probability 0.20 (right), passage [5] is replaced by a clinically plausible but contradictory snippet whose stated findings conflict with the true diagnostic label. The model must then produce the correct label from the radiograph and the four genuine passages, disregarding the misleading fifth entry. This training signal penalises sycophantic agreement with retrieved text that conflicts with visual evidence, thereby reducing calibration error on out-of-distribution retrieval at test time. The injection probability 0.20 and the restriction to passage [5] were chosen by design: replacing earlier passages would undermine the evidence-grounding objective that drives reasoning quality.
+</div>
+
+</body>
+</html>

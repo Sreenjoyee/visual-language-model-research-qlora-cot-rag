@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>System Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  @media screen {
+    html { zoom: 2.4; }
+    body { background: #475569; padding: 10px; display: flex; flex-direction: column;
+           align-items: flex-start; gap: 3px; }
+  }
+  @media print {
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    html { zoom: 1; }
+    @page { size: 176mm 133mm; margin: 0; }
+    body { background: white; padding: 0; display: block; }
+    .canvas { box-shadow: none; }
+    .screen-caption { box-shadow: none; margin-top: 0; }
+  }
+
+  /* ══ Root canvas 176 × 125 mm (Expanded to prevent text clipping) ══ */
+  .canvas {
+    width: 176mm; height: 95mm;
+    background: #F8FAFC;
+    position: relative; overflow: hidden;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.28);
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* ── Header band: dark navy, 16mm tall ── */
+  .hband {
+    position: absolute; top: 0; left: 0; right: 0; height: 16mm;
+    background: linear-gradient(135deg, #0F172A 0%, #1E3A5F 100%);
+    padding: 1.2mm 3.5mm 1.2mm 3.5mm;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .htitle {
+    font-size: 6.6pt; font-weight: 700; color: #F1F5F9;
+    letter-spacing: -.04pt; line-height: 1.15;
+  }
+  .hdesc {
+    font-size: 3.7pt; color: #94A3B8; margin-top: 0.5mm; line-height: 1.4;
+    max-width: 148mm;
+  }
+
+  /* Stage bands (below header) */
+  .sbg { position: absolute; top: 16mm; bottom: 0; }
+  .vd  { position: absolute; top: 16mm; bottom: 0; width: .2mm; background: #CBD5E1; }
+
+  /* Stage label row */
+  .slbl {
+    position: absolute; top: 17mm;
+    font-size: 3.5pt; font-weight: 700; letter-spacing: .4pt;
+    color: #64748B; text-transform: uppercase; text-align: center;
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* Boxes */
+  .box {
+    position: absolute; border-radius: 1mm;
+    padding: 1.1mm 1.1mm; overflow: hidden; z-index: 2;
+  }
+  .fr  { background: #F0FDFA; border: .28mm solid #0D9488; }
+  .tr  { background: #FFFBEB; border: .28mm solid #D97706; }
+  .kb  { background: #F0FDF4; border: .28mm dashed #16A34A; }
+  .out { background: #EEF2FF; border: .28mm solid #4F46E5; }
+  .neu { background: #F8FAFC; border: .28mm solid #94A3B8; }
+
+  /* Typography */
+  .bt  { font-size: 5.8pt; font-weight: 700; color: #0F172A; line-height: 1.3; margin-bottom: 0.8mm; }
+  .bs  { font-size: 4.1pt; color: #475569; line-height: 1.55; margin-bottom: 0.6mm; }
+  .bm  { font-family: 'JetBrains Mono', monospace; font-size: 3.7pt; color: #64748B; line-height: 1.7; margin-bottom: 0.3mm; }
+  .t   { font-family: 'JetBrains Mono', monospace; font-size: 3.7pt; line-height: 1.7; margin-bottom: 0.3mm; }
+  .t-t { color: #0D6E68; font-weight: 500; }
+  .t-a { color: #B45309; font-weight: 500; }
+  .t-g { color: #15803D; font-weight: 500; }
+  .t-v { color: #4338CA; font-weight: 500; }
+
+  .sl {
+    display: block; font-size: 3.5pt; font-weight: 700; letter-spacing: .38pt;
+    text-transform: uppercase; margin: 1mm 0 0.4mm;
+    font-family: 'Inter', sans-serif;
+  }
+  .sl-t { color: #0D9488; } .sl-a { color: #D97706; }
+  .sl-g { color: #16A34A; } .sl-v { color: #4F46E5; } .sl-n { color: #64748B; }
+
+  .hr { border-top: .18mm solid rgba(0,0,0,.08); margin: 1mm 0; }
+
+  .bdg {
+    position: absolute; top: .6mm; right: .7mm;
+    font-size: 2.8pt; font-weight: 700; letter-spacing: .12pt;
+    padding: .15mm .55mm; border-radius: .3mm;
+    font-family: 'Inter', sans-serif;
+  }
+  .b-fr { background: #CCFBF1; color: #0F766E; }
+  .b-tr { background: #FEF3C7; color: #92400E; }
+  .b-kb { background: #DCFCE7; color: #166534; }
+
+  .c4 { display: flex; gap: .65mm; }
+  .col { flex: 1; min-width: 0; }
+
+  /* Training strip */
+  .tstrip {
+    position: absolute; height: 2.6mm;
+    display: flex; border-radius: .4mm; overflow: hidden;
+    border: .18mm solid #CBD5E1;
+  }
+  .ts {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2.85pt; font-weight: 600; letter-spacing: .07pt;
+    font-family: 'Inter', sans-serif;
+    white-space: nowrap; 
+  }
+
+  /* Legend */
+  .legend { position: absolute; display: flex; gap: 2mm; align-items: center; }
+  .li { display: flex; align-items: center; gap: .5mm;
+        font-size: 3.3pt; color: #475569; font-family: 'Inter', sans-serif; }
+  .lb { width: 2mm; height: 2mm; border-radius: .25mm; flex-shrink: 0; }
+
+  /* Screen caption */
+  .screen-caption {
+    width: 176mm;
+    font-family: 'Inter', sans-serif;
+    font-size: 4.3pt; color: #374151; line-height: 1.55;
+    margin-top: 1.2mm; background: white;
+    padding: 2mm 3mm;
+    box-shadow: 0 1px 6px rgba(0,0,0,.14);
+  }
+</style>
+</head>
+<body>
+
+<div class="canvas">
+
+  <div class="hband">
+    <div class="htitle">System Architecture: Evidence-Grounded Chest Radiograph Classification via Vision-Language Modelling</div>
+    <div class="hdesc">Spatial representations are extracted by a parameter-frozen convolutional encoder and compressed via cross-attention resampling into compact visual tokens. A QLoRA-fine-tuned language model performs structured chain-of-thought reasoning conditioned jointly on visual tokens and evidence drawn from a dense clinical literature index. A dual-branch perceptron with a learnable temperature scalar produces calibrated diagnostic probabilities.</div>
+  </div>
+
+  <div class="sbg" style="left:4mm;   width:27mm; background:#F8FAFC;"></div>
+  <div class="sbg" style="left:31mm;  width:27mm; background:rgba(204,251,241,.28);"></div>
+  <div class="sbg" style="left:58mm;  width:27mm; background:rgba(254,243,199,.22);"></div>
+  <div class="sbg" style="left:85mm;  width:60mm; background:rgba(254,243,199,.22);"></div>
+  <div class="sbg" style="left:145mm; width:27mm; background:rgba(224,231,255,.38);"></div>
+
+  <div class="vd" style="left:31mm;"></div>
+  <div class="vd" style="left:58mm;"></div>
+  <div class="vd" style="left:85mm;"></div>
+  <div class="vd" style="left:145mm;"></div>
+
+  <div class="slbl" style="left:4mm;   width:27mm;">I. Input</div>
+  <div class="slbl" style="left:31mm;  width:27mm;">II. Visual Encoding</div>
+  <div class="slbl" style="left:58mm;  width:27mm;">III. Fusion</div>
+  <div class="slbl" style="left:85mm;  width:60mm;">IV. Reasoning &amp; Classification</div>
+  <div class="slbl" style="left:145mm; width:27mm;">V. Output</div>
+
+
+  <div class="box neu" style="left:4.5mm;top:21mm;width:25mm;height:48mm;">
+    <div class="bt">Chest Radiograph</div>
+    <div style="width:100%;height:22mm;margin:.5mm 0 .8mm;background:#020617;
+                border-radius:.5mm;overflow:hidden;border:.2mm solid #1E293B;
+                display:flex;align-items:center;justify-content:center;">
+      <img src="../sample_xray.jpg" alt="PA chest radiograph"
+           style="display:block;max-width:100%;max-height:18mm;
+                  width:auto;height:auto;object-fit:contain;
+                  image-rendering:-webkit-optimize-contrast;
+                  image-rendering:crisp-edges;"/>
+    </div>
+    <span class="sl sl-n">Acquisition</span>
+    <div class="bm">Projection: posterior-anterior (PA)</div>
+    <div class="bm">Resampled to 224&times;224 px, 3-ch. RGB</div>
+    <div class="hr"></div>
+    <span class="sl sl-n">Datasets</span>
+    <div class="bm">Train: MIMIC-CXR &middot; IU X-ray</div>
+    <div class="bm">Test: NIH CXR-14 &middot; PadChest</div>
+    <div class="bm">Binary label: Normal / Abnormal</div>
+  </div>
+
+
+  <div class="box fr" style="left:31.5mm;top:21mm;width:25mm;height:48mm;">
+    <div class="bdg b-fr">FROZEN</div>
+    <div class="bt" style="color:#0F766E;">EfficientNet-B0</div>
+    <div class="bs">Convolutional neural network pretrained on ImageNet-1K. All 5.3M parameters remain frozen throughout training; the encoder functions exclusively as a spatial feature extractor.</div>
+    <div class="hr"></div>
+    <span class="sl sl-t">Architecture</span>
+    <div class="bm">Parameters: 5.3 M (non-trainable)</div>
+    <div class="bm">Pretrained on ImageNet-1K</div>
+    <div class="hr"></div>
+    <span class="sl sl-t">Tensor Dimensions</span>
+    <div class="t t-t">In:  (B, 3, 224, 224)</div>
+    <div class="t t-t">Out: (B, 1280, 7, 7)</div>
+    <div class="t t-t">     (B, 49, 1280)</div>
+    <div class="hr"></div>
+    <span class="sl sl-t">Spatial Token Map</span>
+    <div class="bm">7&times;7 feature grid &rarr; 49 tokens</div>
+    <div class="bm">Token dimensionality d = 1,280</div>
+  </div>
+
+
+  <div class="box tr" style="left:58.5mm;top:21mm;width:25mm;height:28mm;">
+    <div class="bdg b-tr">TRAINED</div>
+    <div class="bt" style="color:#92400E;">Perceiver Resampler</div>
+    <div class="bs">Distils 49 spatial tokens into 8 latent queries aligned to the LLM embedding space.</div>
+    <div class="hr"></div>
+    <span class="sl sl-a">Architecture</span>
+    <div class="bm">Layers: 2 &middot; Heads: 8</div>
+    <div class="bm">Output dim: 3,072</div>
+    <div class="hr"></div>
+    <div class="t t-a">In:  (B, 49, 1280)</div>
+    <div class="t t-a">Out: (B,  8, 3072)</div>
+  </div>
+
+  <div class="box tr" style="left:85.5mm;top:21mm;width:58mm;height:28mm;">
+    <div class="bdg b-tr">QLoRA FINE-TUNED</div>
+    <div class="bt" style="color:#92400E;">Llama-3.2-3B-Instruct</div>
+    <div class="hr"></div>
+    <div class="c4">
+      <div class="col">
+        <span class="sl sl-a">Quantisation</span>
+        <div class="bm">4-bit NF4 (QLoRA)</div>
+        <div class="bm">Peak VRAM &le; 4 GB</div>
+        <div class="bm">Grad. accum. steps: 8</div>
+      </div>
+      <div class="col">
+        <span class="sl sl-a">LoRA Config</span>
+        <div class="bm">Rank r = 16</div>
+        <div class="bm">Scaling &alpha; = 32</div>
+        <div class="bm">Targets: q,k,v,o proj.</div>
+      </div>
+      <div class="col">
+        <span class="sl sl-a">Training Objective</span>
+        <div class="t t-a" style="font-size:3.5pt;">&#8466;=0.65&#8466;<sub style="font-size:2.4pt;">cls</sub>+0.35&#8466;<sub style="font-size:2.4pt;">lm</sub></div>
+        <div class="bm">Learning rate: 2&times;10<sup style="font-size:2.2pt;">&minus;4</sup></div>
+        <div class="bm">Total steps: 7,500</div>
+      </div>
+      <div class="col">
+        <span class="sl sl-a">Reasoning Steps</span>
+        <div class="bm">&#9312; Visual obs.</div>
+        <div class="bm">&#9313; Interpretation</div>
+        <div class="bm">&#9314; Evidence</div>
+        <div class="bm">&#9315; Rationale</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="box out" style="left:145.5mm;top:21mm;width:25mm;height:65mm;">
+    <div class="bt" style="color:#312E81;">Diagnostic Report</div>
+    <div class="hr"></div>
+
+    <div style="text-align:center;padding:1mm 0 .8mm;">
+      <div style="font-size:8.5pt;font-weight:700;color:#15803D;
+                  font-family:'Inter',sans-serif;">NORMAL</div>
+      <div style="font-size:3.4pt;color:#94A3B8;margin:.4mm 0;
+                  font-family:'Inter',sans-serif;">or</div>
+      <div style="font-size:8.5pt;font-weight:700;color:#DC2626;
+                  font-family:'Inter',sans-serif;">ABNORMAL</div>
+    </div>
+
+    <div style="background:#E0E7FF;border-radius:.5mm;padding:.5mm .7mm;text-align:center;">
+      <div class="t t-v" style="font-size:3pt;">Youden-J threshold</div>
+      <div class="t" style="font-size:2.8pt;color:#64748B;">&tau;*=argmax(TPR&minus;FPR)</div>
+    </div>
+
+    <div class="hr"></div>
+    <span class="sl sl-v">Structured Reasoning</span>
+    <div class="bm">&#9312; Visual observations</div>
+    <div class="bm">&#9313; Clinical interpretation</div>
+    <div class="bm">&#9314; Evidence alignment</div>
+    <div class="bm">&#9315; Diagnostic rationale</div>
+
+    <div class="hr"></div>
+    <span class="sl sl-v">Evaluation Metrics</span>
+    <div class="bm">AUROC &middot; F1-score &middot; ECE</div>
+    <div class="bm">BERTScore &middot; GREEN</div>
+    <div class="bm">Inference latency vs. GPT-4V</div>
+
+  </div>
+
+
+  <div style="position:absolute;left:58.5mm;top:51.2mm;width:25mm;
+              height:.18mm;background:rgba(100,116,139,.18);z-index:3;"></div>
+  <div style="position:absolute;left:85mm;top:51.2mm;width:58mm;
+              height:.18mm;background:rgba(100,116,139,.18);z-index:3;"></div>
+  <div style="position:absolute;left:114.5mm;top:50mm;transform:translateX(-50%);
+              font-size:3pt;color:#94A3B8;font-style:italic;z-index:4;
+              background:#FEFCE8;padding:0 .4mm;white-space:nowrap;
+              font-family:'Inter',sans-serif;">concurrent inference branches</div>
+
+
+  <div class="box kb" style="left:58.5mm;top:52.5mm;width:25mm;height:34mm;">
+    <div class="bdg b-kb">EXT. KB</div>
+    <div class="bt" style="color:#14532D;">FAISS Index</div>
+    <div class="bs">Dense index over 24,460 peer-reviewed radiology passages; evidence-grounded inference at test time.</div>
+    <div class="hr"></div>
+    <span class="sl sl-g">Configuration</span>
+    <div class="bm">Encoder: MiniLM-L6-v2 (d=384)</div>
+    <div class="bm">Metric: L2 (IndexFlatL2)</div>
+    <div class="hr"></div>
+    <span class="sl sl-g">Retrieval Depth</span>
+    <div class="bm">k=5 by ablation over {1,3,5,7,10}</div>
+    <div class="bm">k=5 yields peak AUROC</div>
+  </div>
+
+  <div class="box tr" style="left:85.5mm;top:52.5mm;width:58mm;height:34mm;">
+    <div class="bdg b-tr">ADVERSARIALLY ROBUST</div>
+    <div class="bt" style="color:#92400E;">Classification Head — Dual-Branch MLP</div>
+    <div class="bs">Fuses mean-pooled visual representations and projected retrieval embeddings through a 512-unit MLP. Output logits are scaled by a learnable temperature scalar &tau;. During Stage 2 training, 20% of retrieved passages are replaced by adversarial snippets.</div>
+    <div class="hr"></div>
+    <div class="c4">
+      <div class="col">
+        <span class="sl sl-a">Visual Branch</span>
+        <div class="t t-a" style="font-size:3.4pt;">x<sub style="font-size:2.3pt;">v</sub>&isin;&#8477;<sup style="font-size:2.3pt;">B&times;8&times;3072</sup></div>
+        <div class="bm">Global mean-pooling</div>
+        <div class="bm">Output: (B, 3072)</div>
+        <div class="bm">Layer normalisation</div>
+      </div>
+      <div class="col">
+        <span class="sl sl-a">Retrieval Branch</span>
+        <div class="t t-a" style="font-size:3.4pt;">x<sub style="font-size:2.3pt;">r</sub>&isin;&#8477;<sup style="font-size:2.3pt;">B&times;5&times;384</sup></div>
+        <div class="bm">Linear(384 &rarr; 3072)</div>
+        <div class="bm">Global mean-pooling</div>
+        <div class="bm">Layer normalisation</div>
+      </div>
+      <div class="col">
+        <span class="sl sl-a">MLP Fusion</span>
+        <div class="bm">[x<sub style="font-size:2.3pt;">v</sub>&Vert;x<sub style="font-size:2.3pt;">r</sub>] &rarr; 6144-d</div>
+        <div class="bm">Linear &rarr; 512</div>
+        <div class="bm">GELU activation</div>
+        <div class="bm">Dropout (p = 0.1)</div>
+        <div class="bm">Linear(512, 2) / &tau;</div>
+      </div>
+      <div class="col">
+        <span class="sl sl-a">Calibration</span>
+        <div class="t t-a" style="font-size:3.4pt;">p&#770;=softmax(&middot;/&tau;)</div>
+        <div class="bm">&tau; learnable; &tau;<sub style="font-size:2.3pt;">0</sub> = 1</div>
+        <div class="hr"></div>
+        <span class="sl sl-a">Adversarial Training</span>
+        <div class="bm">20% of passages</div>
+        <div class="bm">replaced adversarially</div>
+      </div>
+    </div>
+  </div>
+
+
+  <div class="tstrip" style="left:4mm;right:4mm;top:87.5mm;">
+    <div class="ts" style="width:27mm;background:#F1F5F9;color:#64748B;border-radius:.3mm 0 0 .3mm;">Data Preparation</div>
+    <div class="ts" style="width:27mm;background:#CCFBF1;color:#0F766E;border-left:.18mm solid #A7F3D0;">Stage 1: Projector Training</div>
+    <div class="ts" style="width:27mm;background:#FEF3C7;color:#92400E;border-left:.18mm solid #FDE68A;">Stage 2 Initialisation</div>
+    <div class="ts" style="width:60mm;background:#FEF3C7;color:#78350F;border-left:.18mm solid #FDE68A;padding-left:1mm;padding-right:1mm;">Stage 2: Joint optimisation of LoRA adapters and classification head &middot; &#8466;=0.65&#8466;<sub style="font-size:2pt;">cls</sub>+0.35&#8466;<sub style="font-size:2pt;">lm</sub> &middot; 7,500 steps &middot; lr=2&times;10&#8315;&sup4;</div>
+    <div class="ts" style="width:27mm;background:#E0E7FF;color:#312E81;border-left:.18mm solid #C7D2FE;border-radius:0 .3mm .3mm 0;">Performance Evaluation</div>
+  </div>
+
+  <div class="legend" style="left:4mm;top:91mm;">
+    <div class="li"><div class="lb" style="background:#F0FDFA;border:.25mm solid #0D9488;"></div>Frozen</div>
+    <div class="li"><div class="lb" style="background:#FFFBEB;border:.25mm solid #D97706;"></div>Trained</div>
+    <div class="li"><div class="lb" style="background:#F0FDF4;border:.25mm dashed #16A34A;"></div>External KB</div>
+    <div class="li"><div class="lb" style="background:#EEF2FF;border:.25mm solid #4F46E5;"></div>Output</div>
+    <div class="li" style="margin-left:1.5mm;">
+      <svg width="5.5mm" height="1.4mm" style="overflow:visible;"><defs>
+        <marker id="la" markerWidth="2" markerHeight="2" refX="1.8" refY="1" orient="auto">
+          <path d="M0,0L0,2L2,1z" fill="#334155"/></marker></defs>
+        <line x1="0" y1=".7mm" x2="5.2mm" y2=".7mm" stroke="#334155" stroke-width=".3mm" marker-end="url(#la)"/>
+      </svg>Data flow
+    </div>
+    <div class="li">
+      <svg width="5.5mm" height="1.4mm" style="overflow:visible;"><defs>
+        <marker id="lg" markerWidth="2" markerHeight="2" refX="1.8" refY="1" orient="auto">
+          <path d="M0,0L0,2L2,1z" fill="#16A34A"/></marker></defs>
+        <line x1="0" y1=".7mm" x2="5.2mm" y2=".7mm" stroke="#16A34A" stroke-width=".3mm" stroke-dasharray=".9mm,.55mm" marker-end="url(#lg)"/>
+      </svg>Retrieval
+    </div>
+  </div>
+
+
+  <svg style="position:absolute;top:0;left:0;width:176mm;height:95mm;
+              pointer-events:none;overflow:visible;z-index:5;">
+    <defs>
+      <marker id="a"  markerWidth="2.2" markerHeight="2.2" refX="1.8" refY="1.1" orient="auto">
+        <path d="M0,0L0,2.2L2.2,1.1z" fill="#334155"/></marker>
+      <marker id="ag" markerWidth="2.2" markerHeight="2.2" refX="1.8" refY="1.1" orient="auto">
+        <path d="M0,0L0,2.2L2.2,1.1z" fill="#16A34A"/></marker>
+    </defs>
+
+    <line x1="29.5mm" y1="42mm" x2="31.5mm" y2="42mm"
+          stroke="#334155" stroke-width=".35mm" marker-end="url(#a)"/>
+
+    <line x1="56.5mm" y1="35mm" x2="58.5mm" y2="35mm"
+          stroke="#334155" stroke-width=".35mm" marker-end="url(#a)"/>
+
+    <circle cx="83.5mm" cy="35mm" r=".55mm" fill="#334155"/>
+
+    <line x1="83.5mm" y1="35mm" x2="85.5mm" y2="35mm"
+          stroke="#334155" stroke-width=".35mm" marker-end="url(#a)"/>
+
+    <path d="M83.5mm,35mm C84.8mm,55mm 84.8mm,65mm 85.5mm,73mm"
+          stroke="#334155" stroke-width=".28mm" fill="none"
+          stroke-dasharray=".85mm,.55mm" marker-end="url(#a)"/>
+
+    <circle cx="83.5mm" cy="74mm" r=".55mm" fill="#16A34A"/>
+    <path d="M83.5mm,73.5mm C84.8mm,57mm 84.8mm,45mm 85.5mm,36mm"
+          stroke="#16A34A" stroke-width=".28mm" fill="none"
+          stroke-dasharray=".9mm,.55mm" marker-end="url(#ag)"/>
+
+    <line x1="83.5mm" y1="74.5mm" x2="85.5mm" y2="74.5mm"
+          stroke="#16A34A" stroke-width=".3mm"
+          stroke-dasharray=".9mm,.55mm" marker-end="url(#ag)"/>
+
+    <line x1="143.5mm" y1="35mm" x2="145.5mm" y2="38mm"
+          stroke="#334155" stroke-width=".35mm" marker-end="url(#a)"/>
+
+    <line x1="143.5mm" y1="69mm" x2="145.5mm" y2="52mm"
+          stroke="#334155" stroke-width=".35mm" marker-end="url(#a)"/>
+  </svg>
+
+</div>
+
+<div class="screen-caption">
+  <strong>Fig. 1.</strong>
+  Two-stage multimodal architecture for evidence-grounded chest radiograph classification.
+  (<strong>I</strong>)&thinsp;Posterior-anterior radiographs resampled to 224&times;224&thinsp;px.
+  (<strong>II</strong>)&thinsp;A parameter-frozen EfficientNet-B0 backbone produces a 7&times;7 spatial feature map (d&thinsp;=&thinsp;1,280; 49 tokens); encoder weights receive no gradient updates.
+  (<strong>III</strong>)&thinsp;A two-layer Perceiver Resampler distils 49 spatial tokens into 8 latent queries (d&thinsp;=&thinsp;3,072); concurrently, a FAISS index over 24,460 clinical passages retrieves the k&thinsp;=&thinsp;5 most relevant evidence snippets via MiniLM-L6-v2 cosine similarity (k selected by ablation over {1,&thinsp;3,&thinsp;5,&thinsp;7,&thinsp;10}).
+  (<strong>IV</strong>)&thinsp;A QLoRA-fine-tuned Llama-3.2-3B-Instruct (4-bit NF4, LoRA r&thinsp;=&thinsp;16) generates a four-step structured reasoning trace from joint visual–textual context; a dual-branch MLP classification head fuses mean-pooled visual and retrieval representations with learnable temperature calibration and 20% adversarial passage injection (&pound;&thinsp;=&thinsp;0.65&pound;<sub>cls</sub>&thinsp;+&thinsp;0.35&pound;<sub>lm</sub>).
+  (<strong>V</strong>)&thinsp;A binary decision (Normal / Abnormal) is issued at the Youden-J optimal threshold, accompanied by the structured diagnostic reasoning trace.
+  <em>Teal: frozen; amber: trained; dashed green: external knowledge base; indigo: output.</em>
+</div>
+
+</body>
+</html>

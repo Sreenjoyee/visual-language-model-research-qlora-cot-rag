@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CoT Prompt Structure</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  @media screen {
+    html { zoom: 2.4; }
+    body { background: #475569; padding: 10px; display: flex;
+           flex-direction: column; align-items: flex-start; gap: 3px; }
+  }
+  @media print {
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    html { zoom: 1; }
+    @page { size: 176mm 137mm; margin: 0; }
+    body { background: white; padding: 0; display: block; }
+    .canvas  { box-shadow: none; }
+    .caption { box-shadow: none; margin-top: 0; }
+  }
+
+  /*
+    Two-column layout:
+      Prompt card:  0  – 111mm   (left)
+      Sidebar:     112 – 176mm  (right, 64mm)
+
+    Vertical layout (mm from canvas top — target 108mm):
+      Header            0 – 14
+      ─── SYSTEM ─────────────────────────────────
+      Phase header     14 – 18.5   (4.5mm, #1E293B)
+      Content          18.5 – 28.5  (10mm, cool grey bg)
+      ─── gap ────────────────────────────────────
+      Gap strip        28.5 – 30    (1.5mm)
+      ─── USER ───────────────────────────────────
+      Phase header     30 – 34.5   (4.5mm, #1E3A8A)
+      Content – Image  34.5 – 43   (8.5mm, light blue bg)
+      Content – Evid.  43 – 57     (14mm, same bg)
+      Content – Task   57 – 76.5   (19.5mm, same bg)
+      ─── gap ────────────────────────────────────
+      Gap strip        76.5 – 78   (1.5mm)
+      ─── ASSISTANT ──────────────────────────────
+      Phase header     78 – 82.5   (4.5mm, #78350F)
+      Content          82.5 – 102.5 (20mm, warm amber bg)
+      ─── legend ─────────────────────────────────
+      Legend           103 – 108
+      Canvas total: 108mm
+
+    Sidebar annotations (top relative to sidebar start = canvas 14mm):
+      Ann 1 system:   0  – 22   h=22
+      Ann 2 image:   22  – 36   h=14
+      Ann 3 evid:    36  – 56   h=20
+      Ann 4 task:    56  – 76.5 h=20.5
+      Ann 5 asst:    76.5 – 94  h=17.5
+      Total = 94mm = sidebar height (108–14) ✓
+  */
+
+  .canvas {
+    width: 176mm; height: 110mm;
+    background: white; position: relative; overflow: hidden;
+    box-shadow: 0 2px 16px rgba(0,0,0,.28);
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* header */
+  .hband {
+    position: absolute; top: 0; left: 0; right: 0; height: 14mm;
+    background: linear-gradient(135deg, #134E4A 0%, #0F766E 100%);
+    padding: 1.1mm 3.5mm;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .htitle { font-size: 6.4pt; font-weight: 700; color: #F1F5F9; line-height: 1.15; }
+  .hdesc  { font-size: 3.6pt; color: #CCFBF1; margin-top: .45mm;
+            line-height: 1.4; max-width: 162mm; }
+
+  /* ── Phase header rows ──
+     Full-width horizontal bands spanning the prompt column.
+     Each is visually distinct via a dark background + left accent stripe.
+  */
+  .ph {
+    position: absolute; left: 0; width: 111mm; height: 4.5mm;
+    display: flex; align-items: center; padding: 0 2mm 0 2.5mm; gap: 2mm;
+    z-index: 3;
+    border-left: 2.5mm solid rgba(255,255,255,.25); /* accent inset */
+  }
+  .ph-sys  { background: #1E293B; }
+  .ph-usr  { background: #1E3A8A; }
+  .ph-asst { background: #78350F; }
+
+  .ph-role {
+    font-size: 4pt; font-weight: 700; letter-spacing: .6pt;
+    text-transform: uppercase; color: #FFFFFF;
+    font-family: 'Inter', sans-serif;
+  }
+  .ph-desc {
+    font-size: 3pt; color: rgba(255,255,255,.55);
+    font-family: 'Inter', sans-serif; font-weight: 400;
+  }
+
+  /* Phase gap strips — visible breathing lines between turns */
+  .pgap {
+    position: absolute; left: 0; width: 111mm; height: 1.5mm;
+    background: #E8EDF3;
+    border-top: .2mm solid #CBD5E1;
+    border-bottom: .2mm solid #CBD5E1;
+  }
+
+  /* Content blocks — each phase has a distinct background tint */
+  .cb {
+    position: absolute; left: 0; width: 111mm;
+    overflow: visible; padding: .58mm .8mm .58mm .85mm;
+  }
+  /* SYSTEM: cool blue-grey — visually cooler/neutral */
+  .cb-s { background: #EEF2F7; }
+  /* USER sub-blocks: consistent light-blue tint throughout user turn */
+  .cb-u { background: #EEF4FF; }
+  .cb-u2 { background: #E9F0FF; border-top: .15mm solid #DBEAFE; }
+  .cb-u3 { background: #E4EDFF; border-top: .15mm solid #BFDBFE; }
+  /* ASSISTANT: warm amber — clearly different from both */
+  .cb-a { background: #FFF7ED; }
+
+  /* Sub-label inside a content block */
+  .pl {
+    font-family: 'Inter', sans-serif;
+    font-size: 2.8pt; font-weight: 700; letter-spacing: .45pt;
+    text-transform: uppercase; color: #94A3B8; margin-bottom: .22mm;
+    display: flex; align-items: center; gap: .5mm;
+  }
+
+  /* Monospace prompt text */
+  .pt {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 3.5pt; color: #1E293B; line-height: 1.56;
+  }
+
+  /* Inline token highlights */
+  .tk { border-radius: .18mm; padding: 0 .2mm; font-weight: 600; }
+  .tk-img  { background: #CCFBF1; color: #0F766E; }
+  .tk-ev   { background: #DCFCE7; color: #166534; }
+  .tk-key  { background: #FEF3C7; color: #92400E; }
+  .tk-step { background: #EDE9FE; color: #5B21B6; }
+  .tk-lbl  { background: #FEE2E2; color: #991B1B; }
+
+  /* Numbered annotation circles */
+  .ann {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2.8mm; height: 2.8mm; border-radius: 50%;
+    font-size: 2.6pt; font-weight: 700; color: white;
+    font-family: 'Inter', sans-serif; line-height: 1; flex-shrink: 0;
+  }
+  .a1 { background: #475569; }
+  .a2 { background: #0D9488; }
+  .a3 { background: #16A34A; }
+  .a4 { background: #D97706; }
+  .a5 { background: #7C3AED; }
+
+  /* Column divider */
+  .divider {
+    position: absolute; left: 111.5mm; top: 14mm; bottom: 0;
+    width: .2mm; background: #CBD5E1; z-index: 5;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    position: absolute; left: 112mm; width: 64mm; top: 14mm; bottom: 0;
+    background: #F8FAFC; overflow: hidden;
+  }
+
+  /* Individual annotation blocks */
+  .an {
+    position: absolute; left: 0; width: 64mm; overflow: hidden;
+    padding: .5mm .65mm .5mm .6mm;
+    border-bottom: .15mm solid #E2E8F0;
+  }
+  .an-hd { display: flex; align-items: center; gap: .7mm; margin-bottom: .2mm; }
+  .an-t {
+    font-size: 3.4pt; font-weight: 700; color: #0F172A;
+    font-family: 'Inter', sans-serif; line-height: 1.18;
+  }
+  .an-b {
+    font-size: 3.1pt; color: #475569; line-height: 1.44;
+    font-family: 'Inter', sans-serif;
+  }
+  .an-c {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 2.8pt; color: #64748B; display: block; margin-top: .18mm;
+  }
+
+  /* Legend */
+  .legend {
+    position: absolute; display: flex; gap: 1.3mm 2mm;
+    align-items: center; flex-wrap: wrap;
+  }
+  .li { display: flex; align-items: center; gap: .38mm;
+        font-size: 3pt; color: #475569; font-family: 'Inter', sans-serif; }
+  .lb { display: inline-block; height: 2mm; border-radius: .2mm; }
+
+  /* Caption */
+  .caption {
+    width: 176mm; font-family: 'Inter', sans-serif;
+    font-size: 4.3pt; color: #374151; line-height: 1.55;
+    margin-top: 1.2mm; background: white; padding: 2mm 3mm;
+    box-shadow: 0 1px 6px rgba(0,0,0,.14);
+  }
+</style>
+</head>
+<body>
+
+<div class="canvas">
+
+  <div class="hband">
+    <div class="htitle">Chain-of-Thought Prompt Structure: Dialogue Template and Supervised Reasoning Format</div>
+    <div class="hdesc">The conversation follows the LLaMA-3 chat template. A fixed system turn defines the clinical role; the user turn embeds visual tokens alongside FAISS evidence; the supervised assistant turn trains four-step reasoning with a format kept identical at inference to prevent prompt drift.</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="ph ph-sys" style="top:14mm;">
+    <span class="ph-role">System</span>
+    <span class="ph-desc">&mdash; fixed, bias-free role definition</span>
+    <span class="ann a1" style="margin-left:auto;">1</span>
+  </div>
+
+  <div class="cb cb-s" style="top:18.5mm;height:10mm;">
+    <div class="pl">system prompt &mdash; verbatim across all calls</div>
+    <div class="pt">
+      "You are a careful radiology assistant. You analyse chest X-rays<br>
+      and provide a binary classification (<span class="tk tk-lbl">NORMAL</span>
+      or <span class="tk tk-lbl">ABNORMAL</span>) with step-by-step reasoning.<br>
+      You must ground your reasoning in the retrieved clinical evidence.<br>
+      If evidence is insufficient, say so rather than speculate."
+    </div>
+  </div>
+
+  <div class="pgap" style="top:28.5mm;"></div>
+
+  <div class="ph ph-usr" style="top:30mm;">
+    <span class="ph-role">User</span>
+    <span class="ph-desc">&mdash; visual context &nbsp;&#124;&nbsp; retrieved evidence &nbsp;&#124;&nbsp; structured output constraint</span>
+  </div>
+
+  <div class="cb cb-u" style="top:34.5mm;height:8.5mm;">
+    <div class="pl">visual context
+      <span class="ann a2">2</span>
+    </div>
+    <div class="pt">
+      Chest X-ray image:<br>
+      <span class="tk tk-img">&lt;IMAGE&gt;</span>
+      <span style="font-size:3.1pt;color:#64748B;margin-left:1mm;">
+        &larr; 8 Perceiver output tokens injected here as inputs_embeds</span>
+    </div>
+  </div>
+
+  <div class="cb cb-u2" style="top:43mm;height:16mm;">
+    <div class="pl">FAISS retrieved evidence &nbsp;&middot;&nbsp; k = 5
+      <span class="ann a3">3</span>
+    </div>
+    <div class="pt">
+      Retrieved clinical evidence:<br>
+      <span class="tk tk-ev">[1]</span> &lt;clinical passage from index&gt;<br>
+      <span class="tk tk-ev">[2]</span> &lt;clinical passage from index&gt;<br>
+      <span class="tk tk-ev">[3]</span> &lt;clinical passage from index&gt;<br>
+      <span class="tk tk-ev">[4]</span> &lt;clinical passage from index&gt;<br>
+      <span class="tk tk-ev">[5]</span> &lt;clinical passage from index&gt;
+      <span style="font-size:2.9pt;color:#94A3B8;">
+        &nbsp;[training: p&nbsp;=&nbsp;0.20, passage [5] adversarial]</span>
+    </div>
+  </div>
+
+  <div class="cb cb-u3" style="top:59mm;height:19.5mm;">
+    <div class="pl">task instruction &mdash; output format constraint
+      <span class="ann a4">4</span>
+    </div>
+    <div class="pt">
+      Task: Examine the image and evidence. Produce output in EXACTLY this format:<br>
+      <span class="tk tk-key">DIAGNOSIS:</span> &lt;NORMAL or ABNORMAL&gt;<br>
+      <span class="tk tk-key">EVIDENCE_USED:</span>
+        &lt;comma-separated evidence numbers, or NONE&gt;<br>
+      <span class="tk tk-key">REASONING:</span><br>
+      &nbsp;&nbsp;<span class="tk tk-step">1.</span>
+        Visual observations:&nbsp;&nbsp;&lt;what you see in the image&gt;<br>
+      &nbsp;&nbsp;<span class="tk tk-step">2.</span>
+        Clinical interpretation:&nbsp;&lt;what the findings mean clinically&gt;<br>
+      &nbsp;&nbsp;<span class="tk tk-step">3.</span>
+        Evidence support:&nbsp;&nbsp;&nbsp;&nbsp;&lt;cite or paraphrase retrieved passages&gt;<br>
+      &nbsp;&nbsp;<span class="tk tk-step">4.</span>
+        Justification:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;why the final diagnosis follows&gt;
+    </div>
+  </div>
+
+  <div class="pgap" style="top:78.5mm;"></div>
+
+  <div class="ph ph-asst" style="top:80mm;">
+    <span class="ph-role">Assistant</span>
+    <span class="ph-desc">&mdash; supervised training target &nbsp;&#124;&nbsp; not seen at inference</span>
+    <span class="ann a5" style="margin-left:auto;">5</span>
+  </div>
+
+  <div class="cb cb-a" style="top:84.5mm;height:20mm;">
+    <div class="pl">build_classification_target(label, idx) &mdash; 13 diverse templates</div>
+    <div class="pt">
+      <span class="tk tk-key">DIAGNOSIS:</span>
+      <span class="tk tk-lbl">NORMAL</span>&nbsp;/&nbsp;<span class="tk tk-lbl">ABNORMAL</span><br>
+      <span class="tk tk-key">EVIDENCE_USED:</span> 1,&nbsp;2<br>
+      <span class="tk tk-key">REASONING:</span><br>
+      &nbsp;&nbsp;<span class="tk tk-step">1.</span> Clear lung fields bilaterally; no focal consolidation or effusion...<br>
+      &nbsp;&nbsp;<span class="tk tk-step">2.</span> No acute cardiopulmonary abnormality; all landmarks within limits...<br>
+      &nbsp;&nbsp;<span class="tk tk-step">3.</span> Evidence [1] confirms...; Evidence [2] supports...
+        <span style="font-size:2.8pt;color:#94A3B8;">&larr; replaced with MIMIC-CXR report text when available</span><br>
+      &nbsp;&nbsp;<span class="tk tk-step">4.</span> Absence of consolidation/effusion/pneumothorax consistent with normal.
+    </div>
+  </div>
+
+  <div class="sidebar">
+
+    <div class="an" style="top:0;height:22mm;">
+      <div class="an-hd"><span class="ann a1">1</span>
+        <span class="an-t">System Prompt</span></div>
+      <div class="an-b">Contains no disease names or hints, so the model cannot infer the expected answer from the question framing. The identical text is used at training and inference, preventing any diagnostic label from leaking into the question-side loss.</div>
+      <span class="an-c">SYSTEM_PROMPT &mdash; src/prompts.py:24</span>
+    </div>
+
+    <div class="an" style="top:22mm;height:14mm;">
+      <div class="an-hd"><span class="ann a2">2</span>
+        <span class="an-t">&lt;IMAGE&gt; Token Splice</span></div>
+      <div class="an-b">pipeline.py replaces this placeholder with 8 Perceiver output vectors as inputs_embeds, bypassing the text tokeniser. The model attends to visual features at exactly this sequence position.</div>
+    </div>
+
+    <div class="an" style="top:36mm;height:22mm;">
+      <div class="an-hd"><span class="ann a3">3</span>
+        <span class="an-t">FAISS Retrieved Evidence</span></div>
+      <div class="an-b">Five passages are fetched by querying FAISS with the model's own image-caption output, so retrieval is driven by observed findings rather than a generic query. The numbered format lets the model cite specific passages in EVIDENCE_USED. In 20% of training examples, passage [5] is replaced with an adversarial snippet to improve robustness against misleading retrieved evidence.</div>
+    </div>
+
+    <div class="an" style="top:58mm;height:20.5mm;">
+      <div class="an-hd"><span class="ann a4">4</span>
+        <span class="an-t">Structured Output Constraint</span></div>
+      <div class="an-b">The format is enforced token-by-token via cross-entropy on build_classification_target() outputs and kept identical at inference (SRS §12). Any departure degrades label parsing. EVIDENCE_USED logs which passages were cited, enabling post-hoc measurement of susceptibility to misleading retrieved evidence in Experiment 4B.</div>
+      <span class="an-c">build_inference_prompt() &mdash; src/prompts.py:46</span>
+    </div>
+
+    <div class="an" style="top:78.5mm;height:17.5mm;">
+      <div class="an-hd"><span class="ann a5">5</span>
+        <span class="an-t">CoT Training Target</span></div>
+      <div class="an-b">Thirteen templates (5 NORMAL, 8 ABNORMAL) cycle by step index so the model cannot memorise a single reasoning pattern. Step 3 uses actual MIMIC-CXR report text when available. Loss covers only this turn; all prompt positions are masked (labels&nbsp;=&nbsp;&minus;100).</div>
+      <span class="an-c">build_classification_target() &mdash; src/prompts.py:387</span>
+    </div>
+
+  </div>
+
+  <div class="legend" style="left:2mm;top:105mm;">
+    <div class="li">
+      <div class="lb" style="width:4mm;background:#1E293B;"></div>System</div>
+    <div class="li">
+      <div class="lb" style="width:4mm;background:#1E3A8A;"></div>User</div>
+    <div class="li">
+      <div class="lb" style="width:4mm;background:#78350F;"></div>Assistant</div>
+    <div class="li">
+      <div class="lb" style="width:3mm;height:2mm;background:#E8EDF3;
+              border:.18mm solid #CBD5E1;border-radius:.2mm;"></div>Phase gap</div>
+    <div class="li" style="margin-left:.5mm;">
+      <span class="tk tk-img" style="font-family:'JetBrains Mono',monospace;
+             font-size:3pt;padding:.1mm .35mm;">&lt;IMAGE&gt;</span>Visual splice</div>
+    <div class="li">
+      <span class="tk tk-ev" style="font-family:'JetBrains Mono',monospace;
+             font-size:3pt;padding:.1mm .35mm;">[k]</span>Retrieved passage</div>
+    <div class="li">
+      <span class="tk tk-key" style="font-family:'JetBrains Mono',monospace;
+             font-size:3pt;padding:.1mm .35mm;">KEY:</span>Format field</div>
+    <div class="li">
+      <span class="tk tk-step" style="font-family:'JetBrains Mono',monospace;
+             font-size:3pt;padding:.1mm .35mm;">N.</span>CoT step</div>
+    <div class="li">
+      <span class="tk tk-lbl" style="font-family:'JetBrains Mono',monospace;
+             font-size:3pt;padding:.1mm .35mm;">LABEL</span>Diagnosis</div>
+  </div>
+
+</div><div class="caption">
+  <strong>Fig. 4.</strong>
+  Dialogue template and chain-of-thought supervised training format.
+  (<strong>System turn</strong>) A fixed, bias-free system message establishes the radiology
+  assistant role without embedding any disease names or diagnostic cues. The same text is used
+  verbatim during Stage 2 training and at inference.
+  (<strong>User turn</strong>) Three components are assembled at runtime:
+  (i) a visual context block where the IMAGE placeholder is replaced by 8 Perceiver Resampler
+  output vectors injected as inputs_embeds, bypassing the text tokeniser;
+  (ii) five FAISS-retrieved clinical passages formatted by format_retrieved_evidence(), with
+  passage [5] replaced adversarially in 20% of training examples; and
+  (iii) a structured output format instruction specifying the four-field response schema.
+  (<strong>Assistant turn</strong>) Training targets from build_classification_target() cycle
+  through 13 diverse reasoning templates indexed by step count to prevent template memorisation.
+  Step 3 substitutes real MIMIC-CXR report text when available. Loss is computed on assistant
+  turn tokens only; all prompt positions carry labels&nbsp;=&nbsp;&minus;100.
+  Annotation circles cross-reference the sidebar entries.
+</div>
+
+</body>
+</html>
