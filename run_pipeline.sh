@@ -289,7 +289,7 @@ elif [[ -d "$LORA_DIR" && -f "models/cls_head.pt" ]]; then
     _mark_done "step3"
 else
     RESUME_S2=""
-    LATEST_S2_CKPT=$(ls -dt models/lora_step* 2>/dev/null | head -1 || true)
+    LATEST_S2_CKPT=$(ls -d models/lora_step* 2>/dev/null | sort -V | tail -1 || true)
     if [[ -n "$LATEST_S2_CKPT" && -f "$LATEST_S2_CKPT/train_state.pt" ]]; then
         if python -c "import torch; torch.load('$LATEST_S2_CKPT/train_state.pt', map_location='cpu')" 2>/dev/null; then
             echo "[resume] Stage 2 checkpoint valid: $LATEST_S2_CKPT"
