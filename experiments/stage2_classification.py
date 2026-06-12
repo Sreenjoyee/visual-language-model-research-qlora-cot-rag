@@ -36,6 +36,8 @@ import argparse
 import itertools
 import json
 import random
+import re
+import shutil
 import sys
 import time
 from dataclasses import dataclass
@@ -213,7 +215,12 @@ def _encode_example(
     labels = torch.full((1, T), -100, dtype=torch.long, device=device)
     labels[0, T_prompt:] = target_ids[0]
 
-    label_id = 1 if pair.label == "ABNORMAL" else 0
+    if pair.label == "NORMAL":
+        label_id = 0
+    elif pair.label == "ABNORMAL":
+        label_id = 1
+    else:
+        raise ValueError(f"Unexpected label {pair.label!r} — expected 'NORMAL' or 'ABNORMAL'")
 
     return BatchTensors(
         inputs_embeds=inputs_embeds,
@@ -226,6 +233,20 @@ def _encode_example(
 
 
 # ── Training loop ──────────────────────────────────────────────────────────
+
+def _prune_old_checkpoints(models_dir: Path, keep_last_n: int = 2) -> None:
+    """Keep only the most recent keep_last_n lora_stepXXX dirs; delete the rest."""
+    pattern = re.compile(r"lora_step(\d+)$")
+    ckpts = []
+    for d in models_dir.iterdir():
+        m = pattern.match(d.name)
+        if m and d.is_dir():
+            ckpts.append((int(m.group(1)), d))
+    ckpts.sort()
+    for _, d in ckpts[:-keep_last_n]:
+        shutil.rmtree(d)
+        print(f"[stage2] Pruned old checkpoint → {d}")
+
 
 def _save_checkpoint_s2(
     ckpt_dir: Path,
@@ -385,6 +406,7 @@ def train(
     log_f = open(log_path, log_mode, encoding="utf-8")
 
     t_start = time.time()
+    resume_step = global_step  # steps already done before this session
     first_step_grad_checked = False
     accum_loss = 0.0
     accum_cls_loss = 0.0
@@ -402,11 +424,11 @@ def train(
     print(f"[stage2] IU-Xray ABNORMAL samples loaded: {len(iu_xray_abnormals)}")
 
     print("[stage2] Pre-loading Chest X-ray NORMAL samples (Kermany dataset)...")
-    pneumonia_normals: list[LabeledPair] = list(pneumonia_xray_stream(label="NORMAL", max_samples=1341))
+    pneumonia_normals: list[LabeledPair] = list(pneumonia_xray_stream(label="NORMAL", max_samples=400))
     print(f"[stage2] Chest X-ray NORMAL samples loaded: {len(pneumonia_normals)}")
 
     print("[stage2] Pre-loading Chest X-ray ABNORMAL samples (Kermany dataset)...")
-    pneumonia_abnormals: list[LabeledPair] = list(pneumonia_xray_stream(label="ABNORMAL", max_samples=500))
+    pneumonia_abnormals: list[LabeledPair] = list(pneumonia_xray_stream(label="ABNORMAL", max_samples=400))
     print(f"[stage2] Chest X-ray ABNORMAL samples loaded: {len(pneumonia_abnormals)}")
 
     for epoch in range(start_epoch, epochs):
@@ -446,11 +468,22 @@ def train(
                 print(f"[stage2] skip sample ({pair.label}): {type(e).__name__}: {e}")
                 continue
 
-            out = llm.model(
-                inputs_embeds=batch.inputs_embeds,
-                attention_mask=batch.attention_mask,
-                labels=batch.labels,
-            )
+            try:
+                out = llm.model(
+                    inputs_embeds=batch.inputs_embeds,
+                    attention_mask=batch.attention_mask,
+                    labels=batch.labels,
+                )
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    print(f"[stage2] OOM on forward ({pair.label}) — skipping sample")
+                    del batch
+                    torch.cuda.empty_cache()
+                    optimizer.zero_grad(set_to_none=True)
+                    micro_step = 0
+                    accum_loss = accum_cls_loss = accum_lm_loss = 0.0
+                    continue
+                raise
             lm_loss = out.loss
             if lm_loss is None or not torch.isfinite(lm_loss):
                 print(f"[stage2] step {global_step}: non-finite lm_loss, skipping")
@@ -547,7 +580,8 @@ def train(
                 )
                 current_lr = scheduler.get_last_lr()[0]
                 elapsed = time.time() - t_start
-                secs_per_step = elapsed / max(global_step, 1)
+                steps_this_session = global_step - resume_step
+                secs_per_step = elapsed / max(steps_this_session, 1)
                 steps_left = total_steps - global_step
                 eta_s = secs_per_step * steps_left
                 eta_h = eta_s / 3600
@@ -584,6 +618,7 @@ def train(
                     ckpt_dir, llm.model, cls_head, config.cls_head_path,
                     optimizer, scheduler, global_step, epoch,
                 )
+                _prune_old_checkpoints(lora_save_dir.parent, keep_last_n=2)
 
     # Write final log row even if global_step never hit log_every (short runs)
     if global_step > 0:
