@@ -234,20 +234,6 @@ def _encode_example(
 
 # ── Training loop ──────────────────────────────────────────────────────────
 
-def _prune_old_checkpoints(models_dir: Path, keep_last_n: int = 2) -> None:
-    """Keep only the most recent keep_last_n lora_stepXXX dirs; delete the rest."""
-    pattern = re.compile(r"lora_step(\d+)$")
-    ckpts = []
-    for d in models_dir.iterdir():
-        m = pattern.match(d.name)
-        if m and d.is_dir():
-            ckpts.append((int(m.group(1)), d))
-    ckpts.sort()
-    for _, d in ckpts[:-keep_last_n]:
-        shutil.rmtree(d)
-        print(f"[stage2] Pruned old checkpoint → {d}")
-
-
 def _save_checkpoint_s2(
     ckpt_dir: Path,
     model,
@@ -618,7 +604,6 @@ def train(
                     ckpt_dir, llm.model, cls_head, config.cls_head_path,
                     optimizer, scheduler, global_step, epoch,
                 )
-                _prune_old_checkpoints(lora_save_dir.parent, keep_last_n=2)
 
     # Write final log row even if global_step never hit log_every (short runs)
     if global_step > 0:
