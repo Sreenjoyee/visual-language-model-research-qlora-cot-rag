@@ -361,7 +361,8 @@ def train(
     # Each MIMIC pair yields 5 samples when all supplemental sources are loaded:
     # 1 MIMIC + 1 IU-Normal + 1 IU-Abnormal + 1 Kermany-Normal + 1 Kermany-Abnormal
     _interleave_factor = 5
-    total_steps = epochs * max_pairs * _interleave_factor // max(grad_accum_steps, 1)
+    steps_per_epoch = max(1, max_pairs * _interleave_factor // max(grad_accum_steps, 1))
+    total_steps = epochs * steps_per_epoch
     scheduler = get_cosine_schedule_with_warmup(
         optimizer,
         num_warmup_steps=warmup_steps,
@@ -417,8 +418,15 @@ def train(
     pneumonia_abnormals: list[LabeledPair] = list(pneumonia_xray_stream(label="ABNORMAL", max_samples=400))
     print(f"[stage2] Chest X-ray ABNORMAL samples loaded: {len(pneumonia_abnormals)}")
 
-    for epoch in range(start_epoch, epochs):
-        print(f"[stage2] === Epoch {epoch + 1}/{epochs} ===")
+    # Step-budget loop (resume-safe): train until global_step reaches total_steps,
+    # regardless of how many data passes that takes. On resume we continue from the
+    # saved global_step and stop exactly at total_steps — no redoing a full epoch and
+    # no overshooting the LR schedule. Each outer iteration is one fresh pass over the
+    # interleaved stream; data cycles as needed until the step budget is met.
+    while global_step < total_steps:
+        epoch = min(global_step // steps_per_epoch, epochs - 1)   # 0-indexed, for display
+        print(f"[stage2] === Data pass | epoch {epoch + 1}/{epochs} "
+              f"| step {global_step}/{total_steps} ===")
         optimizer.zero_grad(set_to_none=True)
 
         # Interleave MIMIC stream with IU-Xray NORMAL and ABNORMAL samples.
@@ -448,6 +456,8 @@ def train(
             pn_normal_cycle, pn_abnormal_cycle,
         )
         for pair in stream:
+            if global_step >= total_steps:
+                break
             try:
                 batch = _encode_example(pair, vision, projector, llm, retriever, config, step_idx=global_step, adv_rng=adv_rng)
             except Exception as e:
@@ -558,6 +568,7 @@ def train(
             accum_cls_loss = 0.0
             accum_lm_loss = 0.0
             global_step += 1
+            epoch = min(global_step // steps_per_epoch, epochs - 1)   # keep label in sync
 
             if global_step % log_every == 0:
                 vram_gb = (
