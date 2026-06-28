@@ -44,11 +44,14 @@ from src.eval_runner import ScoredResult, run_eval_stream
 from src.metrics import (
     auroc_score,
     binary_metrics,
+    bootstrap_ci,
     evidence_alignment_rate,
     evidence_citation_rate,
     expected_calibration_error,
     green_judge,
     latency_stats,
+    metrics_at_threshold,
+    optimal_threshold,
     reasoning_completeness_score,
     unparseable_rate,
 )
@@ -121,6 +124,14 @@ def _compile_report(
     clf  = binary_metrics(y_true, y_pred)
     auc  = auroc_score(y_true, y_scores)
     ece  = expected_calibration_error(y_true, y_scores)
+
+    # #2 threshold tuning (Youden's J) — report metrics AT the optimal threshold.
+    opt        = optimal_threshold(y_true, y_scores)
+    clf_at_opt = metrics_at_threshold(y_true, y_scores, opt["threshold"])
+    # #4 bootstrap 95% CIs for the headline metrics.
+    ci_auroc = bootstrap_ci(y_true, y_scores, metric="auroc")
+    ci_f1    = bootstrap_ci(y_true, y_scores, metric="f1", threshold=opt["threshold"])
+    ci_ece   = bootstrap_ci(y_true, y_scores, metric="ece")
     cit  = evidence_citation_rate(ev_lists)
     rcs  = reasoning_completeness_score(reasonings)
     upr  = unparseable_rate(diagnoses)
@@ -145,6 +156,16 @@ def _compile_report(
             "reasoning_completeness": rcs,
             "evidence_alignment_rate": eal,
             "unparseable_rate": upr,
+        },
+        "optimal_threshold": {
+            "threshold": opt["threshold"],
+            "youden_j": opt["youden_j"],
+            "metrics_at_threshold": clf_at_opt,
+        },
+        "confidence_intervals_95": {
+            "auroc": ci_auroc,
+            "f1_at_optimal_threshold": ci_f1,
+            "ece": ci_ece,
         },
         "latency": lat,
         "vram": {
@@ -222,17 +243,25 @@ def _print_summary(report: dict) -> None:
             val = f"{v:.4f}" if v == v else "NaN"  # NaN check
             print(f"    {label:<20}: {val}")
 
-    # Youden J optimal threshold — copy this into src/config.py after each full run
-    samples = report.get("per_sample", [])
-    if len(samples) >= 10:
-        from sklearn.metrics import roc_curve
-        yt = [1 if s["true"] == "ABNORMAL" else 0 for s in samples]
-        yp = [s["p_abnormal"] for s in samples]
-        fpr, tpr, thresholds = roc_curve(yt, yp)
-        j = tpr - fpr
-        best = int(np.argmax(j))
-        print(f"\n  Optimal threshold (Youden J={j[best]:.4f}): {thresholds[best]:.4f}")
-        print(f"  → Update src/config.py classification_threshold to {thresholds[best]:.4f}")
+    # #2 Metrics at the Youden-J optimal threshold (recall/F1 usually improve here).
+    if "optimal_threshold" in report:
+        ot = report["optimal_threshold"]
+        m2 = ot["metrics_at_threshold"]
+        print(f"\n  At optimal threshold {ot['threshold']:.3f}  (Youden J={ot['youden_j']:.3f}):")
+        print(
+            f"    Acc {m2['accuracy']:.4f} | Prec {m2['precision']:.4f}"
+            f" | Recall {m2['recall']:.4f} | F1 {m2['f1']:.4f}"
+        )
+        print(f"  → set MEDDIAG_THRESHOLD={ot['threshold']:.4f} to apply it at inference")
+
+    # #4 Bootstrap 95% confidence intervals.
+    if "confidence_intervals_95" in report:
+        ci = report["confidence_intervals_95"]
+        a, f, e = ci["auroc"], ci["f1_at_optimal_threshold"], ci["ece"]
+        print("\n  95% CI (bootstrap):")
+        print(f"    AUROC  {a['point']:.4f}  [{a['ci_low']:.4f}, {a['ci_high']:.4f}]")
+        print(f"    F1@opt {f['point']:.4f}  [{f['ci_low']:.4f}, {f['ci_high']:.4f}]")
+        print(f"    ECE    {e['point']:.4f}  [{e['ci_low']:.4f}, {e['ci_high']:.4f}]")
 
     print("=" * 62)
 

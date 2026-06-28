@@ -99,7 +99,9 @@ def _collect_logits(
 
     print(f"[calibrate] Collecting {val_pairs} validation pairs...")
     with torch.no_grad():
-        for pair in balanced_mimic_stream(config, split="val", max_pairs=val_pairs):
+        # power2004 mirror has no "val" split; calibrate on the configured split
+        # (a single scalar T barely overfits, so this is a safe practical choice).
+        for pair in balanced_mimic_stream(config, split=config.mimic_split, max_pairs=val_pairs):
             try:
                 first_sentence = pair.report.split(".")[0].strip()[:150]
                 retrieved = retriever.query(first_sentence, k=config.retrieval_top_k)
@@ -179,7 +181,7 @@ def main() -> int:
     ap.add_argument("--projector-path", type=Path,
                     default=CONFIG.models_dir / "projector_stage1.pt")
     ap.add_argument("--lora-dir", type=Path,
-                    default=CONFIG.models_dir / "lora_stage2")
+                    default=CONFIG.models_dir / "lora_adapter")
     ap.add_argument("--val-pairs", type=int, default=500,
                     help="Validation pairs to calibrate on.")
     ap.add_argument("--dry-run", action="store_true",

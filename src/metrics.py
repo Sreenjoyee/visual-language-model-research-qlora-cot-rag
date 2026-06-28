@@ -130,6 +130,102 @@ def expected_calibration_error(
     return round(float(ece), 4)
 
 
+# ── Threshold selection (Youden's J) ────────────────────────────────────────────
+
+def predict_labels(y_scores: Sequence[float], threshold: float = 0.5) -> list[int]:
+    """Binarise scores at a threshold (score >= threshold -> 1)."""
+    return [1 if s >= threshold else 0 for s in y_scores]
+
+
+def optimal_threshold(
+    y_true: Sequence[int],
+    y_scores: Sequence[float],
+) -> dict[str, float]:
+    """Threshold maximising Youden's J (= TPR - FPR).
+
+    Pure implementation (no sklearn). Candidate thresholds are the unique scores;
+    a point is classified positive when score >= threshold. Returns the threshold
+    and its J statistic. Falls back to 0.5 for degenerate single-class input.
+    """
+    yt = list(y_true)
+    ys = list(y_scores)
+    n_pos = sum(yt)
+    n_neg = len(yt) - n_pos
+    if n_pos == 0 or n_neg == 0:
+        return {"threshold": 0.5, "youden_j": 0.0}
+
+    best_t, best_j = 0.5, -1.0
+    for t in sorted(set(ys)):
+        tp = sum(1 for s, y in zip(ys, yt) if s >= t and y == 1)
+        fp = sum(1 for s, y in zip(ys, yt) if s >= t and y == 0)
+        tpr = tp / n_pos
+        fpr = fp / n_neg
+        j = tpr - fpr
+        if j > best_j:
+            best_j, best_t = j, t
+    return {"threshold": round(float(best_t), 4), "youden_j": round(float(best_j), 4)}
+
+
+def metrics_at_threshold(
+    y_true: Sequence[int],
+    y_scores: Sequence[float],
+    threshold: float,
+) -> dict[str, float]:
+    """accuracy/precision/recall/F1 when scores are binarised at `threshold`."""
+    return binary_metrics(y_true, predict_labels(y_scores, threshold))
+
+
+# ── Bootstrap confidence intervals ──────────────────────────────────────────────
+
+def bootstrap_ci(
+    y_true: Sequence[int],
+    y_scores: Sequence[float],
+    metric: str = "auroc",
+    threshold: float = 0.5,
+    n_boot: int = 1000,
+    alpha: float = 0.05,
+    seed: int = 0,
+) -> dict[str, float]:
+    """Percentile bootstrap CI for a metric over (y_true, y_scores).
+
+    metric: "auroc" | "f1" | "accuracy" | "ece"  (f1/accuracy use `threshold`).
+    Returns {"point": ..., "ci_low": ..., "ci_high": ...}. Pure stdlib `random`.
+    """
+    import random
+
+    yt = list(y_true)
+    ys = list(y_scores)
+    n = len(yt)
+    if n == 0:
+        return {"point": float("nan"), "ci_low": float("nan"), "ci_high": float("nan")}
+
+    def _compute(yt_s: list[int], ys_s: list[float]) -> float:
+        if metric == "auroc":
+            return auroc_score(yt_s, ys_s)
+        if metric == "ece":
+            return expected_calibration_error(yt_s, ys_s)
+        m = metrics_at_threshold(yt_s, ys_s, threshold)
+        return m["f1"] if metric == "f1" else m["accuracy"]
+
+    point = _compute(yt, ys)
+    rng = random.Random(seed)
+    boots: list[float] = []
+    for _ in range(n_boot):
+        idx = [rng.randrange(n) for _ in range(n)]
+        yt_s = [yt[i] for i in idx]
+        ys_s = [ys[i] for i in idx]
+        val = _compute(yt_s, ys_s)
+        if val == val:  # skip NaN (degenerate resample)
+            boots.append(val)
+
+    if not boots:
+        return {"point": point, "ci_low": float("nan"), "ci_high": float("nan")}
+    boots.sort()
+    lo = boots[int((alpha / 2) * len(boots))]
+    hi = boots[min(int((1 - alpha / 2) * len(boots)), len(boots) - 1)]
+    return {"point": round(point, 4), "ci_low": round(lo, 4), "ci_high": round(hi, 4)}
+
+
 # ── Output quality ─────────────────────────────────────────────────────────────
 
 def evidence_citation_rate(evidence_lists: Sequence[list[int]]) -> float:
