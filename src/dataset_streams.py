@@ -264,7 +264,8 @@ def mimic_eval_stream(
     """MIMIC-CXR samples with reference reports for BERTScore / CHAIR / GREEN."""
     from .data.labeler import assign_label
 
-    _REPO = "itsanmolgupta/mimic-cxr-dataset"
+    import os
+    _REPO = os.environ.get("MEDDIAG_MIMIC_REPO", "power2004/mimic-cxr-dataset")
     _TEXT_COLS = ("impression", "findings", "report")
 
     ds = _retry_load(_REPO, split, hf_token)

@@ -73,7 +73,7 @@ class Config:
     # different layouts ('impression' vs 'report' vs 'findings_section').
     mimic_dataset_repo: str = field(
         default_factory=lambda: os.environ.get(
-            "MEDDIAG_MIMIC_REPO", "itsanmolgupta/mimic-cxr-dataset"
+            "MEDDIAG_MIMIC_REPO", "power2004/mimic-cxr-dataset"
         )
     )
     mimic_split: str = field(
