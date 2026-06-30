@@ -48,6 +48,7 @@ from src.metrics import (
     evidence_alignment_rate,
     evidence_citation_rate,
     expected_calibration_error,
+    fuse_probabilities,
     green_judge,
     latency_stats,
     metrics_at_threshold,
@@ -132,6 +133,20 @@ def _compile_report(
     ci_auroc = bootstrap_ci(y_true, y_scores, metric="auroc")
     ci_f1    = bootstrap_ci(y_true, y_scores, metric="f1", threshold=opt["threshold"])
     ci_ece   = bootstrap_ci(y_true, y_scores, metric="ece")
+
+    # #2 dual-signal ablation: cls-head vs LM-token vs 50/50 fusion.
+    p_cls_list = [r.p_cls for r in results]
+    p_lm_list  = [r.p_lm for r in results]
+    auc_lm = auroc_score(y_true, p_lm_list)
+    if all(pc is not None for pc in p_cls_list):
+        fused     = [fuse_probabilities(pc, pl, 0.5) for pc, pl in zip(p_cls_list, p_lm_list)]
+        auc_fused = auroc_score(y_true, fused)
+    else:
+        auc_fused = None
+
+    # #6 calibration-method comparison (post-hoc; ECE under temperature/Platt/isotonic).
+    from src.calibration_compare import compare_calibration
+    calib_cmp = compare_calibration(y_true, y_scores)
     cit  = evidence_citation_rate(ev_lists)
     rcs  = reasoning_completeness_score(reasonings)
     upr  = unparseable_rate(diagnoses)
@@ -167,6 +182,12 @@ def _compile_report(
             "f1_at_optimal_threshold": ci_f1,
             "ece": ci_ece,
         },
+        "dual_signal_ablation": {
+            "cls_head_only_auroc": auc,
+            "lm_token_only_auroc": auc_lm,
+            "fused_50_50_auroc": auc_fused,
+        },
+        "calibration_comparison": calib_cmp,
         "latency": lat,
         "vram": {
             "peak_gb": round(max(vrams) if vrams else 0.0, 3),
@@ -263,6 +284,22 @@ def _print_summary(report: dict) -> None:
         print(f"    F1@opt {f['point']:.4f}  [{f['ci_low']:.4f}, {f['ci_high']:.4f}]")
         print(f"    ECE    {e['point']:.4f}  [{e['ci_low']:.4f}, {e['ci_high']:.4f}]")
 
+    # #2 dual-signal ablation
+    if "dual_signal_ablation" in report:
+        d = report["dual_signal_ablation"]
+        line = f"\n  Dual-signal AUROC:  cls-head {d['cls_head_only_auroc']:.4f} | LM-token {d['lm_token_only_auroc']:.4f}"
+        if d.get("fused_50_50_auroc") is not None:
+            line += f" | fused(50/50) {d['fused_50_50_auroc']:.4f}"
+        print(line)
+
+    # #6 calibration-method comparison
+    if "calibration_comparison" in report:
+        c = report["calibration_comparison"]
+        if "error" not in c:
+            parts = [f"{k}={c[k]:.4f}" for k in ("none", "temperature", "platt", "isotonic")
+                     if isinstance(c.get(k), (int, float))]
+            print("  Calibration ECE:  " + " | ".join(parts) + f"   (best: {c.get('best_method', '?')})")
+
     print("=" * 62)
 
 
@@ -304,6 +341,11 @@ def main() -> int:
         help="Samples per augmentation (default 50 to keep runtime tractable).",
     )
     ap.add_argument(
+        "--tta",
+        action="store_true",
+        help="Test-time augmentation: average cls_head over flips/brightness (K× cls cost, no extra generation).",
+    )
+    ap.add_argument(
         "--out-file",
         type=Path,
         default=None,
@@ -323,10 +365,21 @@ def main() -> int:
         lora_adapter_dir=args.lora_adapter_dir,
     )
 
+    # ── TTA augmentation functions (#5) ───────────────────────────────────────
+    tta_fns = None
+    if args.tta:
+        from PIL import ImageEnhance, ImageOps
+        tta_fns = [
+            lambda im: ImageOps.mirror(im.convert("RGB")),
+            lambda im: ImageEnhance.Brightness(im.convert("RGB")).enhance(0.85),
+            lambda im: ImageEnhance.Brightness(im.convert("RGB")).enhance(1.15),
+        ]
+        print("[eval] TTA enabled — averaging cls_head over original + hflip + brightness 0.85/1.15")
+
     # ── Main evaluation ───────────────────────────────────────────────────────
     print(f"\n[eval] Main evaluation — {args.max_samples} balanced samples...")
     stream = balanced_mimic_stream(CONFIG, split="train", max_pairs=args.max_samples)
-    results = run_eval_stream(pipeline, iter(stream), max_samples=args.max_samples)
+    results = run_eval_stream(pipeline, iter(stream), max_samples=args.max_samples, tta_fns=tta_fns)
 
     if not results:
         print("[eval] ERROR: no samples evaluated — check dataset access.")

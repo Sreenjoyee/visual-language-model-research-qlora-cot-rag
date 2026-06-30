@@ -254,8 +254,8 @@ def exp2_rag_quality(
 
     for pair in tqdm(items, desc="  [Exp 2] RAG+NoRAG inference", unit="sample"):
         try:
-            d_rag, _ = _diagnose_scored(pipeline, pair.image, no_rag=False)
-            d_no,  _ = _diagnose_scored(pipeline, pair.image, no_rag=True)
+            d_rag, *_ = _diagnose_scored(pipeline, pair.image, no_rag=False)
+            d_no,  *_ = _diagnose_scored(pipeline, pair.image, no_rag=True)
         except Exception as e:
             tqdm.write(f"  sample error: {e}")
             continue
@@ -310,8 +310,8 @@ def exp3_bertscore_comparison(
         refs, rag_outs, no_rag_outs = [], [], []
         for pair in tqdm(items, desc="  [Exp 3] BERTScore inference", unit="sample"):
             try:
-                d_rag, _ = _diagnose_scored(pipeline, pair.image, no_rag=False)
-                d_no,  _ = _diagnose_scored(pipeline, pair.image, no_rag=True)
+                d_rag, *_ = _diagnose_scored(pipeline, pair.image, no_rag=False)
+                d_no,  *_ = _diagnose_scored(pipeline, pair.image, no_rag=True)
                 refs.append(pair.report)
                 rag_outs.append(d_rag.raw_output)
                 no_rag_outs.append(d_no.raw_output)
@@ -567,7 +567,7 @@ def exp7_rag_ablation(
         for pair in tqdm(items, desc=f"  [Exp 7] k={k}", unit="sample"):
             t0 = time.perf_counter()
             try:
-                diag, _ = _diagnose_scored(pipeline, pair.image, no_rag=(k == 0))
+                diag, *_ = _diagnose_scored(pipeline, pair.image, no_rag=(k == 0))
             except Exception as e:
                 print(f"    sample error: {e}")
                 continue

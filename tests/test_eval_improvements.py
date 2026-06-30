@@ -12,6 +12,7 @@ from src.metrics import (
     binary_metrics,
     bootstrap_ci,
     expected_calibration_error,
+    fuse_probabilities,
     metrics_at_threshold,
     optimal_threshold,
     predict_labels,
@@ -162,8 +163,8 @@ def test_compile_report_emits_threshold_and_ci():
     results = [
         SimpleNamespace(
             true_label=lbl, pred_label=("ABNORMAL" if s >= 0.5 else "NORMAL"),
-            p_abnormal=s, correct=True, evidence_used=[1], reasoning="x",
-            latency_s=1.0, vram_peak_gb=0.3, source="mimic",
+            p_abnormal=s, p_cls=s, p_lm=s, correct=True, evidence_used=[1],
+            reasoning="x", latency_s=1.0, vram_peak_gb=0.3, source="mimic",
         )
         for lbl, s in rows
     ]
@@ -178,3 +179,47 @@ def test_compile_report_emits_threshold_and_ci():
     ci = rep["confidence_intervals_95"]
     for key in ("auroc", "f1_at_optimal_threshold", "ece"):
         assert ci[key]["ci_low"] <= ci[key]["point"] <= ci[key]["ci_high"]
+
+    # #2 dual-signal ablation + #6 calibration comparison sections present
+    assert "dual_signal_ablation" in rep
+    assert rep["dual_signal_ablation"]["fused_50_50_auroc"] is not None
+    assert "calibration_comparison" in rep
+
+
+# ── #2 dual-signal fusion ────────────────────────────────────────────────────────
+
+def test_fuse_probabilities_convex():
+    assert fuse_probabilities(0.8, 0.4, 0.5) == pytest.approx(0.6)
+    assert fuse_probabilities(0.9, 0.1, 1.0) == pytest.approx(0.9)   # all weight on primary
+    assert fuse_probabilities(0.9, 0.1, 0.0) == pytest.approx(0.1)   # all on secondary
+
+
+def test_fuse_probabilities_handles_missing():
+    assert fuse_probabilities(0.8, None) == pytest.approx(0.8)
+    assert fuse_probabilities(None, 0.4) == pytest.approx(0.4)
+    assert fuse_probabilities(None, None) == pytest.approx(0.5)
+
+
+def test_fuse_probabilities_clamps_weight():
+    assert fuse_probabilities(0.8, 0.2, 2.0) == pytest.approx(0.8)   # weight clamped to 1
+    assert fuse_probabilities(0.8, 0.2, -1.0) == pytest.approx(0.2)  # clamped to 0
+
+
+# ── #6 calibration comparison ────────────────────────────────────────────────────
+
+def test_compare_calibration_reduces_ece_on_overconfident_data():
+    from src.calibration_compare import compare_calibration
+    # Overconfident: bin@0.9 is only 70% positive, bin@0.1 is 30% positive.
+    y_true = [1] * 70 + [0] * 30 + [1] * 30 + [0] * 70
+    y_prob = [0.9] * 100 + [0.1] * 100
+    out = compare_calibration(y_true, y_prob, test_frac=0.5, seed=3)
+    assert out["none"] > 0.1                       # genuinely miscalibrated
+    assert out["temperature"] <= out["none"]       # temperature must not hurt; here it helps
+    assert 0.0 <= out["temperature"] <= 1.0
+    assert "best_method" in out
+
+
+def test_compare_calibration_small_input_guard():
+    from src.calibration_compare import compare_calibration
+    out = compare_calibration([0, 1], [0.2, 0.8])
+    assert "error" in out

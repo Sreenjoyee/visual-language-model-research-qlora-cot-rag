@@ -226,6 +226,29 @@ def bootstrap_ci(
     return {"point": round(point, 4), "ci_low": round(lo, 4), "ci_high": round(hi, 4)}
 
 
+# ── Dual-signal fusion (#2) ──────────────────────────────────────────────────────
+
+def fuse_probabilities(
+    p_primary: float | None,
+    p_secondary: float | None,
+    weight: float = 0.5,
+) -> float:
+    """Convex blend of two abnormality probabilities.
+
+    `weight` is the weight on the primary signal (cls_head); 1 - weight on the
+    secondary (LM token prob). If one signal is missing (None), the other is
+    returned unchanged. `weight` is clamped to [0, 1].
+    """
+    w = max(0.0, min(1.0, weight))
+    if p_primary is None and p_secondary is None:
+        return 0.5
+    if p_secondary is None:
+        return float(p_primary)
+    if p_primary is None:
+        return float(p_secondary)
+    return float(w * p_primary + (1.0 - w) * p_secondary)
+
+
 # ── Output quality ─────────────────────────────────────────────────────────────
 
 def evidence_citation_rate(evidence_lists: Sequence[list[int]]) -> float:

@@ -37,6 +37,8 @@ class ScoredResult:
     latency_s: float
     vram_peak_gb: float
     source: str
+    p_cls: float | None = None   # cls_head probability (None if head unavailable)
+    p_lm: float = 0.5            # LM label-token probability (always available)
     correct: bool = field(init=False)
 
     def __post_init__(self) -> None:
@@ -96,7 +98,8 @@ def _diagnose_scored(
     pipeline: MeddiagPipeline,
     image: Image.Image,
     no_rag: bool = False,
-) -> tuple[DiagnosisResult, float]:
+    tta_fns: list | None = None,
+) -> tuple[DiagnosisResult, float, float | None, float]:
     """Run one inference step and return (DiagnosisResult, p_abnormal).
 
     Mirrors pipeline.diagnose() but:
@@ -134,9 +137,20 @@ def _diagnose_scored(
             print("[warn] cls_head loaded but all retrieved embeddings are None — falling back to text-parse")
         if rag_embs:
             rag_tensor = torch.from_numpy(np.stack(rag_embs)).unsqueeze(0).to(device)
-            logits = pipeline.cls_head(visual_embeds, rag_tensor)        # (1, 2)
-            probs = torch.softmax(logits, dim=-1)
-            cls_confidence = probs[0, 1].item()
+            if tta_fns:
+                # #5 TTA: average cls_head prob over original + augmented views.
+                # Only the vision→projector→cls_head path is re-run (no extra LLM
+                # generation), so cost is K× the cheap classification forward.
+                confs: list[float] = []
+                for fn in [None] + list(tta_fns):
+                    aug_img = image if fn is None else fn(image)
+                    pv = pipeline.vision.preprocess(aug_img).to(device)
+                    ve = pipeline.projector(pipeline.vision(pv))
+                    confs.append(torch.softmax(pipeline.cls_head(ve, rag_tensor), dim=-1)[0, 1].item())
+                cls_confidence = sum(confs) / len(confs)
+            else:
+                logits = pipeline.cls_head(visual_embeds, rag_tensor)    # (1, 2)
+                cls_confidence = torch.softmax(logits, dim=-1)[0, 1].item()
             cls_diagnosis = (
                 "ABNORMAL"
                 if cls_confidence >= pipeline.config.classification_threshold
@@ -192,7 +206,8 @@ def _diagnose_scored(
     # Prefer cls_head probability for AUROC/ECE — it is a proper softmax probability
     # rather than a logit-heuristic extracted from the label token.
     final_p_abn = cls_confidence if cls_confidence is not None else p_abn
-    return diag, final_p_abn
+    # also return the two raw signals: p_cls (cls_head) and p_lm (LM token prob)
+    return diag, final_p_abn, cls_confidence, p_abn
 
 
 def run_eval_stream(
@@ -200,6 +215,7 @@ def run_eval_stream(
     labeled_stream: Iterator[LabeledPair],
     max_samples: int = 200,
     no_rag: bool = False,
+    tta_fns: list | None = None,
 ) -> list[ScoredResult]:
     """Evaluate pipeline over a labeled stream.
 
@@ -226,7 +242,9 @@ def run_eval_stream(
 
         t0 = time.perf_counter()
         try:
-            diag, p_abn = _diagnose_scored(pipeline, pair.image, no_rag=no_rag)
+            diag, p_abn, p_cls, p_lm = _diagnose_scored(
+                pipeline, pair.image, no_rag=no_rag, tta_fns=tta_fns
+            )
         except Exception as exc:
             print(f"  [{i+1:4d}] ERROR: {type(exc).__name__}: {exc} — skipped")
             continue
@@ -252,6 +270,8 @@ def run_eval_stream(
             latency_s=round(latency, 3),
             vram_peak_gb=round(vram_peak_gb, 3),
             source=pair.source,
+            p_cls=p_cls,
+            p_lm=p_lm,
         )
         results.append(scored)
 
