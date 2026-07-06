@@ -117,6 +117,26 @@ class Config:
     # Dimension of the hidden layer in the classification MLP.
     cls_hidden_dim: int = 512
 
+    # --- Run 4: vision-encoder fine-tuning + train-time augmentation (AUROC levers) ---
+    # Defaults keep the encoder frozen and augmentation off (Run-3 behavior).
+    #   vision_finetune         unfreeze EfficientNet-B0 so its features adapt to CXR
+    #                           (the same encoder — just trainable). ~10x below LoRA LR.
+    #   vision_lr               LR for the unfrozen encoder params.
+    #   vision_finetune_blocks  how many trailing encoder blocks to unfreeze (<=0 = all).
+    #   vision_augment          light train-time aug (small rotation + brightness/contrast).
+    vision_finetune: bool = field(
+        default_factory=lambda: os.environ.get("MEDDIAG_VISION_FINETUNE", "").lower() in ("1", "true", "yes")
+    )
+    vision_lr: float = field(
+        default_factory=lambda: float(os.environ.get("MEDDIAG_VISION_LR", "1e-5"))
+    )
+    vision_finetune_blocks: int = field(
+        default_factory=lambda: int(os.environ.get("MEDDIAG_VISION_FT_BLOCKS", "2"))
+    )
+    vision_augment: bool = field(
+        default_factory=lambda: os.environ.get("MEDDIAG_VISION_AUGMENT", "").lower() in ("1", "true", "yes")
+    )
+
     # --- Inference ---
     max_new_tokens: int = 512
     # Greedy by default to make diagnosis reproducible. SRS §17 flags greedy as an

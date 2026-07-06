@@ -186,10 +186,12 @@ def _encode_example(
     eos = torch.tensor([[tokenizer.eos_token_id]], device=device, dtype=target_ids.dtype)
     target_ids = torch.cat([target_ids, eos], dim=1)
 
-    # 4. Vision → projector
-    with torch.no_grad():
-        pixel_values = vision.preprocess(pair.image).to(device)
-        vision_tokens = vision(pixel_values)             # (1, N, C_v)
+    # 4. Vision → projector. Optional train-time augmentation on the image; the
+    #    encoder runs under no_grad unless fine-tuning is enabled (handled inside
+    #    VisionEncoder.forward), so grads reach the encoder only when unfrozen.
+    src_image = _augment_image(pair.image, adv_rng) if config.vision_augment else pair.image
+    pixel_values = vision.preprocess(src_image).to(device)
+    vision_tokens = vision(pixel_values)                 # (1, N, C_v)
     visual_embeds = projector(vision_tokens)             # (1, K, D_llm) bf16
     perceiver_out = visual_embeds                        # kept for ClassificationHead; no detach — cls_loss must reach input_norm
 
@@ -291,6 +293,26 @@ def classification_loss(
     return (w * ce_per).mean()
 
 
+def _augment_image(image, rng=None):
+    """Light, CXR-appropriate train-time augmentation (Run-4 AUROC/OOD lever).
+
+    Small rotation + brightness/contrast jitter — the variations a real scanner /
+    positioning produces. Deliberately NO horizontal flip (that would swap
+    anatomical laterality, e.g. put the heart on the right). Conservative ranges so
+    diagnostic content is preserved.
+    """
+    import random as _random
+    from PIL import Image as _Image, ImageEnhance
+    r = rng if rng is not None else _random
+    img = image.convert("RGB") if image.mode != "RGB" else image
+    ang = r.uniform(-8.0, 8.0)
+    if abs(ang) > 0.5:
+        img = img.rotate(ang, resample=_Image.BILINEAR, fillcolor=(0, 0, 0))
+    img = ImageEnhance.Brightness(img).enhance(r.uniform(0.9, 1.1))
+    img = ImageEnhance.Contrast(img).enhance(r.uniform(0.9, 1.1))
+    return img
+
+
 def train(
     config: Config,
     projector_path: Path | None,
@@ -338,10 +360,21 @@ def train(
     vision.to(llm.device)
     projector.to(llm.device).to(torch.bfloat16)
 
-    # Freeze vision entirely — never updated
+    # Freeze vision entirely — never updated (default). Run 4 can unfreeze it below.
     for p in vision.parameters():
         p.requires_grad = False
     vision.eval()
+
+    # Run 4 (AUROC lever): optionally fine-tune the encoder so ImageNet features
+    # adapt to chest X-rays. Same EfficientNet-B0 — just made trainable at a low LR.
+    vision_params: list = []
+    if config.vision_finetune:
+        n_blocks = config.vision_finetune_blocks if config.vision_finetune_blocks > 0 else None
+        vision_params = vision.enable_finetune(last_n_blocks=n_blocks)
+        print(f"[stage2] Vision fine-tune ON: {sum(p.numel() for p in vision_params):,} params "
+              f"@ lr={config.vision_lr} (last {n_blocks if n_blocks else 'all'} blocks)")
+    if config.vision_augment:
+        print("[stage2] Train-time CXR augmentation ON (rotation ±8°, brightness/contrast ±10%)")
 
     # Freeze projector but unfreeze input_norm so it can learn domain-invariant
     # feature scaling for OOD generalisation (LayerNorm starts at identity so
@@ -387,7 +420,8 @@ def train(
             {"params": lora_params,                        "lr": lr},
             {"params": list(cls_head.parameters()),        "lr": lr},
             {"params": input_norm_params,                  "lr": lr * 0.1},
-        ],
+        ]
+        + ([{"params": vision_params, "lr": config.vision_lr}] if vision_params else []),
         weight_decay=0.01,
     )
 

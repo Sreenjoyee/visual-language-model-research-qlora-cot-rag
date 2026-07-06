@@ -44,6 +44,8 @@ class VisionEncoder(nn.Module):
         self._hidden_dim: int | None = None
         # Cached after first forward: True = CNN 4D output, False = ViT 3D output
         self._output_is_4d: bool | None = None
+        # Run-4: when True the encoder is unfrozen and forward() builds a grad graph.
+        self._finetune: bool = False
 
     @property
     def num_tokens(self) -> int:
@@ -67,14 +69,20 @@ class VisionEncoder(nn.Module):
         batch = self.processor(images=image, return_tensors="pt")
         return batch["pixel_values"]
 
-    @torch.no_grad()
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         """pixel_values: (B, 3, H, W) -> (B, N, C)
 
-        Handles both CNN output (B, C, H, W) and ViT output (B, N, C).
-        CNN 4D tensors are permuted and flattened to (B, H*W, C) so the
-        projector always receives a consistent 3D sequence.
+        Runs under no_grad (frozen encoder) unless enable_finetune() has been called
+        (Run-4 vision fine-tuning), in which case a gradient graph is built so the
+        encoder weights can be updated.
         """
+        if self._finetune:
+            return self._encode(pixel_values)
+        with torch.no_grad():
+            return self._encode(pixel_values)
+
+    def _encode(self, pixel_values: torch.Tensor) -> torch.Tensor:
+        """Backbone forward + reshape to (B, N, C). Handles CNN 4D and ViT 3D output."""
         out = self.model(pixel_values=pixel_values, return_dict=True)
         tokens = out.last_hidden_state
 
@@ -99,3 +107,23 @@ class VisionEncoder(nn.Module):
         self._num_tokens = tokens.shape[1]
         self._hidden_dim = tokens.shape[2]
         return tokens
+
+    def enable_finetune(self, last_n_blocks: int | None = None) -> list[nn.Parameter]:
+        """Unfreeze encoder weights for fine-tuning (Run-4 AUROC lever).
+
+        Keeps the module in eval() so BatchNorm running stats stay fixed — safe for
+        batch-size-1 training; only conv/linear weights receive gradients. Unfreezes
+        the last ``last_n_blocks`` encoder blocks, or the whole backbone if that many
+        blocks can't be located (e.g. a non-EfficientNet backbone). Returns the
+        trainable parameters so the caller can add them to the optimizer.
+        """
+        self._finetune = True
+        blocks = getattr(getattr(self.model, "encoder", None), "blocks", None)
+        if last_n_blocks and blocks is not None and len(blocks) >= last_n_blocks:
+            params = [p for blk in list(blocks)[-last_n_blocks:] for p in blk.parameters()]
+        else:
+            params = list(self.model.parameters())
+        for p in params:
+            p.requires_grad = True
+        self.model.eval()   # keep BatchNorm running stats fixed (batch size 1)
+        return [p for p in params if p.requires_grad]
