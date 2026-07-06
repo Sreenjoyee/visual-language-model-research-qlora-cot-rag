@@ -102,6 +102,18 @@ class Config:
     cls_alpha: float = field(
         default_factory=lambda: float(os.environ.get("MEDDIAG_CLS_ALPHA", "0.65"))
     )
+    # Recall-oriented classification loss (Run 4). Defaults reproduce the plain
+    # label-smoothed CE used through Run 3.
+    #   cls_pos_weight  > 1.0 up-weights the ABNORMAL class (raises recall/sensitivity
+    #                   by making false negatives costlier). e.g. 2.0-3.0.
+    #   cls_focal_gamma > 0.0 enables focal loss (down-weights easy examples so the
+    #                   model focuses on the hard/confidently-missed abnormals). e.g. 2.0.
+    cls_pos_weight: float = field(
+        default_factory=lambda: float(os.environ.get("MEDDIAG_CLS_POS_WEIGHT", "1.0"))
+    )
+    cls_focal_gamma: float = field(
+        default_factory=lambda: float(os.environ.get("MEDDIAG_CLS_FOCAL_GAMMA", "0.0"))
+    )
     # Dimension of the hidden layer in the classification MLP.
     cls_hidden_dim: int = 512
 

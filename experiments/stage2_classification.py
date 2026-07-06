@@ -258,6 +258,39 @@ def _save_checkpoint_s2(
     print(f"[stage2] Checkpoint saved → {ckpt_dir}  (step {step})")
 
 
+def classification_loss(
+    logits: torch.Tensor,
+    target: torch.Tensor,
+    *,
+    pos_weight: float = 1.0,
+    focal_gamma: float = 0.0,
+    label_smoothing: float = 0.1,
+) -> torch.Tensor:
+    """Recall-oriented classification loss (Run 4).
+
+    With the defaults (pos_weight=1.0, focal_gamma=0.0) this is exactly the
+    label-smoothed cross-entropy used through Run 3. Run 4 knobs:
+      - pos_weight > 1 scales the loss on ABNORMAL (class id 1) samples so false
+        negatives cost more -> higher recall/sensitivity. Applied as a per-sample
+        weight because a mean-reduced weighted CE cancels the weight when the
+        batch is a single sample (Stage 2 trains batch-size-1 with grad accum).
+      - focal_gamma > 0 applies focal modulation (1 - p_true)^gamma, concentrating
+        the gradient on hard / confidently-misclassified examples.
+    """
+    w = torch.where(
+        target == 1,
+        torch.as_tensor(pos_weight, device=logits.device, dtype=logits.dtype),
+        torch.as_tensor(1.0, device=logits.device, dtype=logits.dtype),
+    )
+    if focal_gamma and focal_gamma > 0.0:
+        logp = F.log_softmax(logits, dim=-1)
+        pt = logp.exp().gather(1, target.view(-1, 1)).squeeze(1).clamp_(1e-6, 1.0)
+        ce_per = F.nll_loss(logp, target, reduction="none")
+        return (w * ((1.0 - pt) ** focal_gamma) * ce_per).mean()
+    ce_per = F.cross_entropy(logits, target, label_smoothing=label_smoothing, reduction="none")
+    return (w * ce_per).mean()
+
+
 def train(
     config: Config,
     projector_path: Path | None,
@@ -485,13 +518,20 @@ def train(
                 print(f"[stage2] step {global_step}: non-finite lm_loss, skipping")
                 continue
 
-            # Classification loss — unweighted because the interleaved stream is
-            # balanced 1:1 (MIMIC alternates N/A; IU-Xray and Kermany each contribute
-            # one N and one A per MIMIC pair). Label smoothing reduces overconfidence
-            # on training examples and improves OOD calibration.
+            # Classification loss. The interleaved stream is balanced 1:1, so by
+            # default this is plain label-smoothed CE (label smoothing curbs
+            # overconfidence and improves OOD calibration). Run 4 can up-weight the
+            # ABNORMAL class (cls_pos_weight) and/or enable focal loss
+            # (cls_focal_gamma) to raise recall on abnormals — see classification_loss.
             label_tensor = torch.tensor([batch.label_id], device=llm.device)
             cls_logits = cls_head(batch.perceiver_out, batch.rag_embeddings)  # (1, 2)
-            cls_loss = F.cross_entropy(cls_logits, label_tensor, label_smoothing=0.1)
+            cls_loss = classification_loss(
+                cls_logits,
+                label_tensor,
+                pos_weight=config.cls_pos_weight,
+                focal_gamma=config.cls_focal_gamma,
+                label_smoothing=0.1,
+            )
 
             if not torch.isfinite(cls_loss):
                 print(f"[stage2] step {global_step}: non-finite cls_loss, skipping")
