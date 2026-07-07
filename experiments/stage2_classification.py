@@ -365,8 +365,8 @@ def train(
         p.requires_grad = False
     vision.eval()
 
-    # Run 4 (AUROC lever): optionally fine-tune the encoder so ImageNet features
-    # adapt to chest X-rays. Same EfficientNet-B0 — just made trainable at a low LR.
+    # Optional (AUROC lever): fine-tune the DenseNet-121 encoder so its CXR features
+    # adapt further to the training set. Made trainable at a low LR.
     vision_params: list = []
     if config.vision_finetune:
         n_blocks = config.vision_finetune_blocks if config.vision_finetune_blocks > 0 else None

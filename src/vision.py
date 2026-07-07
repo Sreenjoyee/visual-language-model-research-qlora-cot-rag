@@ -23,17 +23,17 @@ from .config import CONFIG, Config
 class VisionEncoder(nn.Module):
     """Frozen vision encoder producing spatial tokens.
 
-    EfficientNet-B0 at 224×224: last_hidden_state is (B, 1280, 7, 7).
-    forward() reshapes CNN 4D output → (B, 49, 1280) before returning.
-    ViT-like models that already return (B, N, C) pass through unchanged.
-    Actual N and C are derived at runtime via properties.
+    DenseNet-121 (TorchXRayVision) at 224×224: features() is (B, 1024, 7, 7),
+    reshaped to (B, 49, 1024) before returning. A HuggingFace AutoModel backbone
+    (CNN 4D or ViT 3D output) is also supported; actual N and C are derived at
+    runtime via properties.
     """
 
     def __init__(self, config: Config):
         super().__init__()
         self.config = config
-        # "xrv:<weights>" selects a TorchXRayVision CXR-pretrained backbone; anything
-        # else is loaded as a HuggingFace AutoModel (default: EfficientNet-B0).
+        # "xrv:<weights>" selects a TorchXRayVision CXR-pretrained backbone (default:
+        # DenseNet-121); any other id is loaded as a generic HuggingFace AutoModel.
         self._is_xrv = str(config.vision_model_id).startswith("xrv:")
         if self._is_xrv:
             import torchxrayvision as xrv

@@ -20,7 +20,7 @@ from src.config import CONFIG
 from src.prompts import build_inference_prompt
 
 
-VISION_DIM = CONFIG.vision_hidden_dim   # 1280 for EfficientNet-B0
+VISION_DIM = CONFIG.vision_hidden_dim   # 1024 for DenseNet-121
 LLM_DIM = CONFIG.llm_hidden_dim         # 3072 for LLaMA-3.2-3B
 NUM_LATENTS = CONFIG.num_visual_tokens  # 8
 

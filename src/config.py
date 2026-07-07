@@ -58,10 +58,10 @@ class Config:
     image_size: int = 224
 
     # --- Projector (Perceiver Resampler) ---
-    # EfficientNet-B0 final feature map: 1280 channels.
-    # Spatial map 7×7=49 tokens after reshape from (B,1280,7,7) → (B,49,1280).
+    # DenseNet-121 final feature map: 1024 channels.
+    # Spatial map 7×7=49 tokens after reshape from (B,1024,7,7) → (B,49,1024).
     # Token count N is read dynamically — projector cross-attention handles any N.
-    # num_heads=8 divides evenly into 1280 (1280/8=160).
+    # (num_heads applies to the llm_dim attention space: 3072/8=384, not vision_dim.)
     # SRS §19.2 projector output: (B, 8, 3072).
     vision_hidden_dim: int = field(default_factory=_vision_hidden_dim_default)
     num_visual_tokens: int = 8           # compressed visual tokens passed to LLM
@@ -134,8 +134,8 @@ class Config:
 
     # --- Run 4: vision-encoder fine-tuning + train-time augmentation (AUROC levers) ---
     # Defaults keep the encoder frozen and augmentation off (Run-3 behavior).
-    #   vision_finetune         unfreeze EfficientNet-B0 so its features adapt to CXR
-    #                           (the same encoder — just trainable). ~10x below LoRA LR.
+    #   vision_finetune         unfreeze the DenseNet-121 encoder so features adapt
+    #                           further to the training set. ~10x below LoRA LR.
     #   vision_lr               LR for the unfrozen encoder params.
     #   vision_finetune_blocks  how many trailing encoder blocks to unfreeze (<=0 = all).
     #   vision_augment          light train-time aug (small rotation + brightness/contrast).

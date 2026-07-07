@@ -18,7 +18,7 @@ from src.projector import PerceiverResampler
 from src.config import CONFIG
 
 # Standard projector config matching production settings
-VISION_DIM = CONFIG.vision_hidden_dim   # 1280 for EfficientNet-B0
+VISION_DIM = CONFIG.vision_hidden_dim   # 1024 for DenseNet-121
 LLM_DIM = CONFIG.llm_hidden_dim         # 3072 for LLaMA-3.2-3B
 NUM_LATENTS = CONFIG.num_visual_tokens  # 8
 NUM_HEADS = CONFIG.projector_num_heads  # 8
@@ -40,7 +40,7 @@ def proj() -> PerceiverResampler:
 
 def test_output_shape_batch_1(proj):
     """SRS §19.2: random tensor -> valid output shape (B, 8, 3072)."""
-    x = torch.randn(1, 49, VISION_DIM)  # EfficientNet-B0: 7×7=49 spatial tokens
+    x = torch.randn(1, 49, VISION_DIM)  # DenseNet-121: 7x7=49 spatial tokens
     out = proj(x)
     assert out.shape == (1, NUM_LATENTS, LLM_DIM), f"Got {out.shape}"
 
