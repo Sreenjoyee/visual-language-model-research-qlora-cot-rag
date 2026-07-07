@@ -72,9 +72,10 @@ def test_only_projector_params_receive_gradients(proj):
     Here we verify the projector parameters DO receive gradients when
     loss.backward() is called with projector output.
     """
+    torch.manual_seed(0)                            # deterministic — not suite-order dependent
     vision_tokens = torch.randn(1, 49, VISION_DIM)  # simulates frozen encoder output
     out = proj(vision_tokens).float()
-    loss = out.mean()
+    loss = (out ** 2).sum()                         # every output contributes; avoids grad underflow to exactly 0
     loss.backward()
 
     grads = {

@@ -17,6 +17,17 @@ load_dotenv()
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
+def _vision_hidden_dim_default() -> int:
+    """Feature dim of the configured vision backbone (kept in sync with the model)."""
+    override = os.environ.get("MEDDIAG_VISION_HIDDEN_DIM")
+    if override:
+        return int(override)
+    model = os.environ.get("MEDDIAG_VISION_MODEL", "xrv:densenet121-res224-all")
+    if "densenet121" in model:
+        return 1024          # TorchXRayVision DenseNet-121 (default encoder)
+    return 1024
+
+
 @dataclass
 class Config:
     # --- Secrets / auth ---
@@ -33,9 +44,13 @@ class Config:
 
     # --- Model IDs ---
     # SRS §5: frozen lightweight vision encoder, outputs spatial tokens.
-    # EfficientNet-B0: 5.3M params, CNN backbone, ImageNet pretrained.
-    # Output: last_hidden_state (B, 1280, 7, 7) at 224×224 → reshaped to (B, 49, 1280).
-    vision_model_id: str = "google/efficientnet-b0"
+    # Default: TorchXRayVision DenseNet-121 ("xrv:densenet121-res224-all", ~8M,
+    # pretrained on the union of NIH/CheXpert/MIMIC/PadChest → (B,1024,7,7)),
+    # chosen for cross-dataset (OOD) generalisation. An "xrv:<weights>" tag loads a
+    # TorchXRayVision backbone; any other value loads a HuggingFace AutoModel.
+    vision_model_id: str = field(
+        default_factory=lambda: os.environ.get("MEDDIAG_VISION_MODEL", "xrv:densenet121-res224-all")
+    )
     llm_model_id: str = "meta-llama/Llama-3.2-3B-Instruct"
     embedder_model_id: str = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -48,7 +63,7 @@ class Config:
     # Token count N is read dynamically — projector cross-attention handles any N.
     # num_heads=8 divides evenly into 1280 (1280/8=160).
     # SRS §19.2 projector output: (B, 8, 3072).
-    vision_hidden_dim: int = 1280
+    vision_hidden_dim: int = field(default_factory=_vision_hidden_dim_default)
     num_visual_tokens: int = 8           # compressed visual tokens passed to LLM
     projector_num_heads: int = 8
     projector_num_layers: int = 2
