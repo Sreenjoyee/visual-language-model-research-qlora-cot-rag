@@ -259,6 +259,63 @@ class TestStage2Checkpoint:
         assert state["epoch"] == 3
 
 
+# ── Checkpoint rotation (stage 2 disk cap) ────────────────────────────────────
+
+class TestStage2CheckpointRotation:
+    """_rotate_checkpoints_s2 keeps only the newest N lora_step* dirs on disk."""
+
+    def _make_ckpts(self, root: Path, steps: list[int]) -> None:
+        for s in steps:
+            d = root / f"lora_step{s}"
+            d.mkdir(parents=True)
+            (d / "adapter_model.safetensors").write_bytes(b"x")
+
+    def test_keeps_only_newest_n(self, tmp_path):
+        from experiments.stage2_classification import _rotate_checkpoints_s2
+        self._make_ckpts(tmp_path, [250, 500, 750, 1000, 1250])
+        _rotate_checkpoints_s2(tmp_path, keep_last=2)
+        remaining = sorted(d.name for d in tmp_path.iterdir())
+        assert remaining == ["lora_step1000", "lora_step1250"]
+
+    def test_rotation_is_numeric_not_lexical(self, tmp_path):
+        """Step 1000 must outrank step 900 (int sort, not string sort)."""
+        from experiments.stage2_classification import _rotate_checkpoints_s2
+        self._make_ckpts(tmp_path, [900, 1000, 1100])
+        _rotate_checkpoints_s2(tmp_path, keep_last=1)
+        remaining = [d.name for d in tmp_path.iterdir()]
+        assert remaining == ["lora_step1100"]
+
+    def test_keep_last_zero_disables_rotation(self, tmp_path):
+        from experiments.stage2_classification import _rotate_checkpoints_s2
+        self._make_ckpts(tmp_path, [100, 200, 300])
+        _rotate_checkpoints_s2(tmp_path, keep_last=0)
+        assert len(list(tmp_path.iterdir())) == 3
+
+    def test_final_adapter_dirs_never_removed(self, tmp_path):
+        """lora_adapter / lora_adapter_swa are not lora_step* → always preserved."""
+        from experiments.stage2_classification import _rotate_checkpoints_s2
+        self._make_ckpts(tmp_path, [100, 200, 300, 400])
+        (tmp_path / "lora_adapter").mkdir()
+        (tmp_path / "lora_adapter_swa").mkdir()
+        _rotate_checkpoints_s2(tmp_path, keep_last=1)
+        names = sorted(d.name for d in tmp_path.iterdir())
+        assert names == ["lora_adapter", "lora_adapter_swa", "lora_step400"]
+
+    def test_keeps_at_least_swa_last_n(self, tmp_path):
+        """Default keep_last=8 preserves enough checkpoints for SWA --last-n 8."""
+        from experiments.stage2_classification import _rotate_checkpoints_s2
+        steps = list(range(250, 250 * 13, 250))  # 12 checkpoints
+        self._make_ckpts(tmp_path, steps)
+        _rotate_checkpoints_s2(tmp_path, keep_last=8)
+        assert len(list(tmp_path.iterdir())) == 8
+
+    def test_noop_when_fewer_than_keep_last(self, tmp_path):
+        from experiments.stage2_classification import _rotate_checkpoints_s2
+        self._make_ckpts(tmp_path, [100, 200])
+        _rotate_checkpoints_s2(tmp_path, keep_last=8)
+        assert len(list(tmp_path.iterdir())) == 2
+
+
 # ── Gradient accumulation logic ───────────────────────────────────────────────
 
 class TestGradientAccumulation:

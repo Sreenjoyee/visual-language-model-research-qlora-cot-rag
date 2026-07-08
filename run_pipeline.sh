@@ -180,6 +180,7 @@ if [[ $SMOKE -eq 1 ]]; then
     SAVE_EVERY=0
     EVAL_SAMPLES=4
     ROBUSTNESS_SAMPLES=2
+    KEEP_LAST_S2=0  # smoke: tiny run, keep everything
     GRAD_ACCUM=1  # smoke: 2 pairs × 3 epochs = 6 steps; accum=1 ensures updates fire
     echo "[info] SMOKE mode — minimal 2-pair run for pipeline verification (CPU-safe)"
 else
@@ -191,6 +192,7 @@ else
     SAVE_EVERY_S2=250   # Stage 2: ~100MB per checkpoint — every 250 steps to reduce storage
     EVAL_SAMPLES=200
     ROBUSTNESS_SAMPLES=50
+    KEEP_LAST_S2=8  # Stage-2 disk cap: keep only newest 8 lora_step* ckpts (>= SWA --last-n 8)
     GRAD_ACCUM=8  # RTX 3050 4GB: keeps per-step activation memory low
     MAX_PUBMED=5000
 fi
@@ -308,6 +310,7 @@ else
         --warmup-steps     "$WARMUP_S2" \
         --grad-accum-steps "$GRAD_ACCUM" \
         --save-every       "${SAVE_EVERY_S2:-100}" \
+        --keep-last-checkpoints "${KEEP_LAST_S2:-8}" \
         --log-every        25 \
         --lora-save-dir    "$LORA_DIR" \
         $RESUME_S2

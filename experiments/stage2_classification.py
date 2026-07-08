@@ -260,6 +260,33 @@ def _save_checkpoint_s2(
     print(f"[stage2] Checkpoint saved → {ckpt_dir}  (step {step})")
 
 
+# Matches a mid-training checkpoint dir like "lora_step1500". Anchored with $ so it
+# never matches the final "lora_adapter" / "lora_adapter_swa" output dirs.
+_LORA_STEP_PAT = re.compile(r"lora_step(\d+)$")
+
+
+def _rotate_checkpoints_s2(parent_dir: Path, keep_last: int) -> None:
+    """Delete oldest lora_step* checkpoints, keeping only the newest `keep_last`.
+
+    Stage-2 disk hygiene: mid-training checkpoints (~100 MB each) otherwise accumulate
+    unbounded. Keeping the last N caps disk while preserving enough late checkpoints for
+    SWA weight-averaging (experiments.average_checkpoints --last-n) and for resume
+    (run_pipeline resumes from the highest-step dir, which is always kept). keep_last <= 0
+    disables rotation. Only lora_step* dirs are matched, so the final lora_adapter /
+    lora_adapter_swa dirs are never removed. Must be >= the SWA --last-n in use.
+    """
+    if keep_last <= 0:
+        return
+    ckpts = sorted(
+        (int(_LORA_STEP_PAT.match(d.name).group(1)), d)
+        for d in parent_dir.iterdir()
+        if d.is_dir() and _LORA_STEP_PAT.match(d.name)
+    )
+    for _, d in ckpts[:-keep_last]:
+        shutil.rmtree(d, ignore_errors=True)
+        print(f"[stage2] Rotated out old checkpoint → {d.name}  (keep_last={keep_last})")
+
+
 def classification_loss(
     logits: torch.Tensor,
     target: torch.Tensor,
@@ -326,6 +353,7 @@ def train(
     save_every: int = 500,
     resume_from: Path | None = None,
     grad_accum_steps: int = 1,
+    keep_last_checkpoints: int = 8,
 ) -> None:
     config.validate()
 
@@ -689,6 +717,7 @@ def train(
                     ckpt_dir, llm.model, cls_head, config.cls_head_path,
                     optimizer, scheduler, global_step, epoch,
                 )
+                _rotate_checkpoints_s2(lora_save_dir.parent, keep_last_checkpoints)
 
     # Write final log row even if global_step never hit log_every (short runs)
     if global_step > 0:
@@ -733,6 +762,9 @@ def main() -> int:
                     help="Linear warmup steps before cosine decay.")
     ap.add_argument("--save-every", type=int, default=500,
                     help="Save mid-training checkpoint every N optimizer steps (0 = off).")
+    ap.add_argument("--keep-last-checkpoints", type=int, default=8,
+                    help="Keep only the newest N lora_step* checkpoints on disk (0 = keep all). "
+                         "Must be >= the SWA --last-n so weight-averaging still has enough.")
     ap.add_argument("--resume-from", type=Path, default=None,
                     help="LoRA checkpoint directory to resume from (must contain train_state.pt).")
     ap.add_argument("--grad-accum-steps", type=int, default=1,
@@ -756,6 +788,7 @@ def main() -> int:
             save_every=args.save_every,
             resume_from=args.resume_from,
             grad_accum_steps=args.grad_accum_steps,
+            keep_last_checkpoints=args.keep_last_checkpoints,
         )
     except KeyboardInterrupt:
         print("\n[stage2] Interrupted by user.")
