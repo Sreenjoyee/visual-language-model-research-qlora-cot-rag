@@ -33,16 +33,50 @@ def _to_pil(raw) -> Image.Image:
     return Image.open(raw).convert("RGB")
 
 
+def _kermany_local_root() -> str | None:
+    """Root of a locally-attached Kaggle Kermany dataset (folder layout with
+    NORMAL/ + PNEUMONIA/ subdirs, e.g. paultimothymooney/chest-xray-pneumonia),
+    or None. Set MEDDIAG_KERMANY_DIR to override. Avoids HF's Xet CDN (403s on Kaggle)."""
+    import os, glob
+    d = os.environ.get("MEDDIAG_KERMANY_DIR")
+    if d and os.path.isdir(d):
+        return d
+    return "/kaggle/input" if glob.glob("/kaggle/input/**/PNEUMONIA", recursive=True) else None
+
+
 def pneumonia_xray_stream(
     label: str = "NORMAL",
     max_samples: int = 1000,
 ) -> Iterator[LabeledPair]:
     """Yield LabeledPairs from the chest X-ray pneumonia dataset.
 
+    Prefers a locally-attached Kaggle Kermany dataset (folder format) to avoid HF's
+    Xet CDN; otherwise streams hf-vision/chest-xray-pneumonia. Same NORMAL/ABNORMAL
+    labels either way.
+
     Args:
         label:       "NORMAL" or "ABNORMAL" (PNEUMONIA maps to ABNORMAL)
         max_samples: Maximum samples to yield
     """
+    import os, glob
+    _root = _kermany_local_root()
+    if _root:
+        _folder = "NORMAL" if label == "NORMAL" else "PNEUMONIA"
+        _files = sorted(f for f in glob.glob(os.path.join(_root, "**", _folder, "*"), recursive=True)
+                        if f.lower().endswith((".jpeg", ".jpg", ".png")))
+        print(f"[pneumonia_xray_stream] LOCAL Kermany: {len(_files)} {label} files under {_root}")
+        _count = 0
+        for _f in _files:
+            if _count >= max_samples:
+                return
+            try:
+                _img = Image.open(_f).convert("RGB")
+            except Exception:
+                continue
+            yield LabeledPair(image=_img, report=_FALLBACK_REPORT[label], label=label, source="pneumonia-xray-local")
+            _count += 1
+        return
+
     from datasets import load_dataset
 
     target_int = 0 if label == "NORMAL" else 1
