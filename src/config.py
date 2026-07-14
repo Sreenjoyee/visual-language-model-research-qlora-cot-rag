@@ -51,7 +51,11 @@ class Config:
     vision_model_id: str = field(
         default_factory=lambda: os.environ.get("MEDDIAG_VISION_MODEL", "xrv:densenet121-res224-all")
     )
-    llm_model_id: str = "meta-llama/Llama-3.2-3B-Instruct"
+    # Env-overridable so it can point at a locally-attached copy (e.g. a Kaggle Model
+    # mounted under /kaggle/input) — needed when HF's Xet CDN is unreachable/403s.
+    llm_model_id: str = field(
+        default_factory=lambda: os.environ.get("MEDDIAG_LLM_MODEL", "meta-llama/Llama-3.2-3B-Instruct")
+    )
     embedder_model_id: str = "sentence-transformers/all-MiniLM-L6-v2"
 
     # --- Image preprocessing ---

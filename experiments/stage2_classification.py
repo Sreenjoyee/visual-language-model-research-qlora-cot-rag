@@ -496,22 +496,24 @@ def train(
     micro_step = 0
     adv_rng = random.Random(42)  # seeded for reproducibility
 
-    # Pre-load IU-Xray samples once — reused across epochs.
-    print("[stage2] Pre-loading IU-Xray NORMAL training samples...")
-    iu_xray_normals: list[LabeledPair] = list(iu_xray_normal_training_stream(max_samples=2000))
-    print(f"[stage2] IU-Xray NORMAL samples loaded: {len(iu_xray_normals)}")
+    # Pre-load supplemental IU-Xray + Kermany samples once — reused across epochs.
+    # Wrapped so a dataset failure (e.g. an HF Xet 403 on those parquets) degrades
+    # gracefully to MIMIC-only training instead of crashing the run. The interleave
+    # below already treats an empty supplemental list as "skip this source".
+    def _safe_preload(stream_fn, label):
+        try:
+            out = list(stream_fn())
+            print(f"[stage2] {label} loaded: {len(out)}")
+            return out
+        except Exception as e:
+            print(f"[stage2] {label} UNAVAILABLE ({type(e).__name__}: {e}) — continuing without it")
+            return []
 
-    print("[stage2] Pre-loading IU-Xray ABNORMAL training samples...")
-    iu_xray_abnormals: list[LabeledPair] = list(iu_xray_abnormal_training_stream(max_samples=500))
-    print(f"[stage2] IU-Xray ABNORMAL samples loaded: {len(iu_xray_abnormals)}")
-
-    print("[stage2] Pre-loading Chest X-ray NORMAL samples (Kermany dataset)...")
-    pneumonia_normals: list[LabeledPair] = list(pneumonia_xray_stream(label="NORMAL", max_samples=400))
-    print(f"[stage2] Chest X-ray NORMAL samples loaded: {len(pneumonia_normals)}")
-
-    print("[stage2] Pre-loading Chest X-ray ABNORMAL samples (Kermany dataset)...")
-    pneumonia_abnormals: list[LabeledPair] = list(pneumonia_xray_stream(label="ABNORMAL", max_samples=400))
-    print(f"[stage2] Chest X-ray ABNORMAL samples loaded: {len(pneumonia_abnormals)}")
+    print("[stage2] Pre-loading supplemental sources (IU-Xray + Kermany)...")
+    iu_xray_normals: list[LabeledPair]     = _safe_preload(lambda: iu_xray_normal_training_stream(max_samples=2000), "IU-Xray NORMAL")
+    iu_xray_abnormals: list[LabeledPair]   = _safe_preload(lambda: iu_xray_abnormal_training_stream(max_samples=500), "IU-Xray ABNORMAL")
+    pneumonia_normals: list[LabeledPair]   = _safe_preload(lambda: pneumonia_xray_stream(label="NORMAL", max_samples=400), "Kermany NORMAL")
+    pneumonia_abnormals: list[LabeledPair] = _safe_preload(lambda: pneumonia_xray_stream(label="ABNORMAL", max_samples=400), "Kermany ABNORMAL")
 
     # Step-budget loop (resume-safe): train until global_step reaches total_steps,
     # regardless of how many data passes that takes. On resume we continue from the
