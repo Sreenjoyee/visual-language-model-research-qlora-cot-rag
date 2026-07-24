@@ -116,6 +116,37 @@ class MeddiagPipeline:
             self.cls_head.eval()
             print(f"[pipeline] ClassificationHead loaded from {cls_path}")
 
+        # Post-hoc prediction-ensemble (env-gated MEDDIAG_CLS_ENSEMBLE): average the
+        # softmax of the last N per-checkpoint cls_heads. The classification path is
+        # adapter-independent, so this needs only the small per-step cls_head.pt files
+        # (written by Stage-2) — no LLM reload. eval_runner averages over these.
+        self.cls_head_ensemble: list[ClassificationHead] | None = None
+        import os as _os
+        if _os.environ.get("MEDDIAG_CLS_ENSEMBLE", "").lower() in ("1", "true", "yes"):
+            import re as _re
+            n = int(_os.environ.get("MEDDIAG_CLS_ENSEMBLE_N", "8"))
+            found = sorted(
+                (int(_re.search(r"lora_step(\d+)", p.parent.name).group(1)), p)
+                for p in config.models_dir.glob("lora_step*/cls_head.pt")
+            )
+            heads = []
+            for _, p in found[-n:]:
+                h = ClassificationHead(
+                    llm_dim=self.llm.hidden_dim,
+                    rag_dim=config.embedder_dim,
+                    hidden_dim=config.cls_hidden_dim,
+                )
+                h.load_state_dict(torch.load(p, map_location="cpu"))
+                h.to(self.llm.device); h.eval()
+                heads.append(h)
+            if heads:
+                self.cls_head_ensemble = heads
+                print(f"[pipeline] cls_head prediction-ensemble: {len(heads)} heads "
+                      f"(steps {[s for s,_ in found[-n:]]})")
+            else:
+                print("[pipeline] MEDDIAG_CLS_ENSEMBLE set but no per-checkpoint cls_head.pt "
+                      "found — falling back to single head (needs a run with per-ckpt heads).")
+
     # -------- helpers --------
 
     def _embed_tokens(self, input_ids: torch.Tensor) -> torch.Tensor:

@@ -82,11 +82,24 @@ class VisionEncoder(nn.Module):
         image processor on an RGB image → (1, 3, H, W).
         """
         if self._is_xrv:
+            import os as _os
             import numpy as np
             import torchxrayvision as xrv
             size = self.config.image_size
             img = image.convert("L").resize((size, size))
             arr = np.asarray(img, dtype=np.float32)          # [0, 255]
+            # Post-hoc OOD lever (env-gated MEDDIAG_CLAHE): CLAHE equalises local
+            # contrast so out-of-distribution scanners (PadChest/NIH) better match the
+            # training intensity profile. No retraining. A/B this on a val split.
+            if _os.environ.get("MEDDIAG_CLAHE", "").lower() in ("1", "true", "yes"):
+                a8 = np.clip(arr, 0, 255).astype(np.uint8)
+                try:
+                    import cv2
+                    a8 = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(a8)
+                except Exception:
+                    from skimage import exposure
+                    a8 = (exposure.equalize_adapthist(a8 / 255.0, clip_limit=0.01) * 255).astype(np.uint8)
+                arr = a8.astype(np.float32)
             arr = xrv.datasets.normalize(arr, 255)           # -> [-1024, 1024]
             return torch.from_numpy(arr)[None, None, :, :]   # (1, 1, H, W)
         if image.mode != "RGB":

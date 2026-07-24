@@ -251,6 +251,10 @@ def _save_checkpoint_s2(
     model.save_pretrained(str(ckpt_dir))
     # ClassificationHead — saved separately per SRS §15 checkpoint separation
     torch.save(cls_head.state_dict(), cls_head_path)
+    # Also save a per-checkpoint copy so late checkpoints can be prediction-ensembled
+    # post-hoc (the classification path is adapter-independent — only the head varies,
+    # so averaging these heads' softmax needs no LLM reload). ~a few MB each.
+    torch.save(cls_head.state_dict(), ckpt_dir / "cls_head.pt")
     # Optimizer + scheduler state alongside the adapter
     torch.save({
         "step": step, "epoch": epoch,

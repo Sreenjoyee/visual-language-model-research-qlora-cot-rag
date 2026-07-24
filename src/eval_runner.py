@@ -137,20 +137,27 @@ def _diagnose_scored(
             print("[warn] cls_head loaded but all retrieved embeddings are None — falling back to text-parse")
         if rag_embs:
             rag_tensor = torch.from_numpy(np.stack(rag_embs)).unsqueeze(0).to(device)
+            # Prediction-ensemble: average the softmax over the per-checkpoint cls_head
+            # ensemble when present (MEDDIAG_CLS_ENSEMBLE), else the single head.
+            heads = getattr(pipeline, "cls_head_ensemble", None) or [pipeline.cls_head]
+
+            def _abn_prob(ve) -> float:
+                ps = [torch.softmax(h(ve, rag_tensor), dim=-1)[0, 1].item() for h in heads]
+                return sum(ps) / len(ps)
+
             if tta_fns:
-                # #5 TTA: average cls_head prob over original + augmented views.
-                # Only the vision→projector→cls_head path is re-run (no extra LLM
-                # generation), so cost is K× the cheap classification forward.
+                # #5 TTA × ensemble: average cls_head prob over original + augmented
+                # views AND over the checkpoint ensemble. Only the cheap vision→
+                # projector→head path is re-run (no extra LLM generation).
                 confs: list[float] = []
                 for fn in [None] + list(tta_fns):
                     aug_img = image if fn is None else fn(image)
                     pv = pipeline.vision.preprocess(aug_img).to(device)
                     ve = pipeline.projector(pipeline.vision(pv))
-                    confs.append(torch.softmax(pipeline.cls_head(ve, rag_tensor), dim=-1)[0, 1].item())
+                    confs.append(_abn_prob(ve))
                 cls_confidence = sum(confs) / len(confs)
             else:
-                logits = pipeline.cls_head(visual_embeds, rag_tensor)    # (1, 2)
-                cls_confidence = torch.softmax(logits, dim=-1)[0, 1].item()
+                cls_confidence = _abn_prob(visual_embeds)
             cls_diagnosis = (
                 "ABNORMAL"
                 if cls_confidence >= pipeline.config.classification_threshold
