@@ -194,6 +194,7 @@ def exp1_nih_classification(
     auroc = auroc_score(y_true, y_prob)
     lat   = latency_stats([r.latency_s for r in results])
     vram  = max((r.vram_peak_gb for r in results), default=0.0)
+    ram   = max((r.ram_gb for r in results), default=0.0)
 
     # Find optimal threshold via Youden J (maximises TPR - FPR on the ROC curve)
     optimal_threshold = _find_optimal_threshold(y_true, y_prob)
@@ -232,7 +233,7 @@ def exp1_nih_classification(
         "threshold": {"optimal": optimal_threshold, "youden_j": round(
             max((_tpr(y_true, y_prob, t) - _fpr(y_true, y_prob, t))
                 for t in [optimal_threshold]), 4)},
-        "latency": lat, "peak_vram_gb": round(vram, 3),
+        "latency": lat, "peak_vram_gb": round(vram, 3), "peak_ram_gb": round(ram, 3),
         "literature": _LIT["exp1"],
     }
     _save_json(result, output_dir / "exp1_results.json")

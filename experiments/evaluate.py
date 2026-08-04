@@ -121,6 +121,7 @@ def _compile_report(
     reasonings  = [r.reasoning for r in results]
     latencies   = [r.latency_s for r in results]
     vrams       = [r.vram_peak_gb for r in results]
+    rams        = [r.ram_gb for r in results]
 
     clf  = binary_metrics(y_true, y_pred)
     auc  = auroc_score(y_true, y_scores)
@@ -193,6 +194,10 @@ def _compile_report(
             "peak_gb": round(max(vrams) if vrams else 0.0, 3),
             "mean_gb": round(sum(vrams) / n if n else 0.0, 3),
         },
+        "ram": {
+            "peak_gb": round(max(rams) if rams else 0.0, 3),
+            "mean_gb": round(sum(rams) / n if n else 0.0, 3),
+        },
         "green_judge": green,
     }
 
@@ -215,6 +220,7 @@ def _compile_report(
             "evidence_used": r.evidence_used,
             "latency_s":    r.latency_s,
             "vram_peak_gb": r.vram_peak_gb,
+            "ram_gb":       r.ram_gb,
             "source":       r.source,
         }
         for r in results
@@ -249,6 +255,8 @@ def _print_summary(report: dict) -> None:
     print(f"\n  Latency: mean={lat['mean_s']}s  p95={lat['p95_s']}s  p99={lat['p99_s']}s")
     v = report["vram"]
     print(f"  VRAM peak: {v['peak_gb']:.2f}GB  mean: {v['mean_gb']:.2f}GB")
+    rm = report["ram"]
+    print(f"  RAM  peak: {rm['peak_gb']:.2f}GB  mean: {rm['mean_gb']:.2f}GB")
 
     if "rag_ablation" in report:
         r = report["rag_ablation"]

@@ -39,10 +39,21 @@ class ScoredResult:
     source: str
     p_cls: float | None = None   # cls_head probability (None if head unavailable)
     p_lm: float = 0.5            # LM label-token probability (always available)
+    ram_gb: float = 0.0          # process resident RAM (RSS) in GB at sample end
     correct: bool = field(init=False)
 
     def __post_init__(self) -> None:
         self.correct = (self.true_label == self.pred_label)
+
+
+def _proc_ram_gb() -> float:
+    """Resident RAM (RSS) of this process in GB — the CPU-side memory footprint,
+    logged alongside VRAM. Returns 0.0 if psutil is unavailable."""
+    try:
+        import psutil
+        return psutil.Process().memory_info().rss / (1024 ** 3)
+    except Exception:
+        return 0.0
 
 
 def _extract_p_abnormal(
@@ -257,6 +268,7 @@ def run_eval_stream(
             continue
 
         latency = time.perf_counter() - t0
+        ram_gb = _proc_ram_gb()
         vram_peak_gb = 0.0
         if is_cuda:
             vram_peak_gb = (
@@ -276,6 +288,7 @@ def run_eval_stream(
             reasoning=diag.reasoning,
             latency_s=round(latency, 3),
             vram_peak_gb=round(vram_peak_gb, 3),
+            ram_gb=round(ram_gb, 3),
             source=pair.source,
             p_cls=p_cls,
             p_lm=p_lm,
