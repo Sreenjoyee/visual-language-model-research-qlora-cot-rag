@@ -135,6 +135,11 @@ class Config:
     )
     # Dimension of the hidden layer in the classification MLP.
     cls_hidden_dim: int = 512
+    # Visual pooling in the ClassificationHead: "mean" (default) or "attn" (learned
+    # per-token attention pooling — small AUROC gain). Env-overridable.
+    cls_pool: str = field(
+        default_factory=lambda: os.environ.get("MEDDIAG_CLS_POOL", "mean")
+    )
 
     # --- Run 4: vision-encoder fine-tuning + train-time augmentation (AUROC levers) ---
     # Defaults keep the encoder frozen and augmentation off (Run-3 behavior).

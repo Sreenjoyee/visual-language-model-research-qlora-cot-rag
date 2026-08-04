@@ -430,7 +430,9 @@ def train(
         llm_dim=llm.hidden_dim,
         rag_dim=config.embedder_dim,
         hidden_dim=config.cls_hidden_dim,
+        pool=config.cls_pool,
     )
+    print(f"[stage2] ClassificationHead pooling = {config.cls_pool}")
     cls_head.to(llm.device)
     cls_head.train()
 
