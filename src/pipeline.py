@@ -105,12 +105,14 @@ class MeddiagPipeline:
         self.cls_head: ClassificationHead | None = None
         cls_path = config.cls_head_path
         if cls_path.exists():
+            state = torch.load(cls_path, map_location="cpu")
+            _pool = "attn" if any("vis_attn" in k for k in state) else "mean"
             self.cls_head = ClassificationHead(
                 llm_dim=self.llm.hidden_dim,
                 rag_dim=config.embedder_dim,
                 hidden_dim=config.cls_hidden_dim,
+                pool=_pool,
             )
-            state = torch.load(cls_path, map_location="cpu")
             self.cls_head.load_state_dict(state)
             self.cls_head.to(self.llm.device)
             self.cls_head.eval()
@@ -131,12 +133,14 @@ class MeddiagPipeline:
             )
             heads = []
             for _, p in found[-n:]:
+                _st = torch.load(p, map_location="cpu")
                 h = ClassificationHead(
                     llm_dim=self.llm.hidden_dim,
                     rag_dim=config.embedder_dim,
                     hidden_dim=config.cls_hidden_dim,
+                    pool="attn" if any("vis_attn" in k for k in _st) else "mean",
                 )
-                h.load_state_dict(torch.load(p, map_location="cpu"))
+                h.load_state_dict(_st)
                 h.to(self.llm.device); h.eval()
                 heads.append(h)
             if heads:

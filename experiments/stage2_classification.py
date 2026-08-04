@@ -61,6 +61,7 @@ from src.prompts import (
     build_chat_messages,
     build_classification_target,
     maybe_inject_adversarial,
+    maybe_inject_adversarial_ex,
 )
 from src.retrieval import Retriever
 from src.vision import VisionEncoder
@@ -146,14 +147,23 @@ def _encode_example(
     # Adversarial injection: with ADVERSARIAL_INJECTION_PROB, replace the last
     # snippet with a misleading one. The label stays correct — model must learn
     # to trust visual features over text when they conflict.
+    adv_text: str | None = None
     if adv_rng is not None:
-        snippets = maybe_inject_adversarial(snippets, adv_rng)
+        snippets, adv_text = maybe_inject_adversarial_ex(snippets, adv_rng)
 
     # Stack RAG embeddings for ClassificationHead — fall back to zeros if any
     # snippet is missing its embedding (shouldn't happen with IndexFlatL2).
     rag_embs = [r.embedding for r in retrieved if r.embedding is not None]
     if rag_embs:
         rag_embeddings = torch.from_numpy(np.stack(rag_embs)).unsqueeze(0).float()  # (1, k, 384)
+        # Sycophancy root-cause fix: when an adversarial snippet is injected into the
+        # TEXT prompt, ALSO overwrite the last RAG embedding with that adversarial
+        # snippet's embedding — so the ClassificationHead (not only the LM) is trained
+        # on misleading evidence paired with the CORRECT label, and learns to rely on
+        # the visual signal instead of blindly following retrieved text.
+        if adv_text is not None:
+            adv_emb = retriever.embedder.encode([adv_text], convert_to_numpy=True)[0]
+            rag_embeddings[0, -1] = torch.from_numpy(np.asarray(adv_emb, dtype=np.float32))
     else:
         rag_embeddings = torch.zeros(1, config.retrieval_top_k, config.embedder_dim)
 

@@ -384,6 +384,20 @@ def maybe_inject_adversarial(snippets: list[str], rng: random.Random) -> list[st
     return snippets[:-1] + [adversarial] if snippets else [adversarial]
 
 
+def maybe_inject_adversarial_ex(
+    snippets: list[str], rng: random.Random
+) -> tuple[list[str], str | None]:
+    """Like maybe_inject_adversarial, but also returns the injected adversarial text
+    (or None if no injection). Lets the caller embed the adversarial snippet and
+    inject it into the ClassificationHead's RAG tensor too — not just the LM prompt —
+    so the head learns to resist misleading evidence (fixes RAG sycophancy)."""
+    if rng.random() >= ADVERSARIAL_INJECTION_PROB:
+        return snippets, None
+    adversarial = rng.choice(ADVERSARIAL_SNIPPETS)
+    new = snippets[:-1] + [adversarial] if snippets else [adversarial]
+    return new, adversarial
+
+
 def build_classification_target(
     label: str,
     idx: int = 0,

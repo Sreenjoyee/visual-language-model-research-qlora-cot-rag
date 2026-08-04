@@ -37,8 +37,17 @@ class ClassificationHead(nn.Module):
         llm_dim: int = 3072,
         rag_dim: int = 384,
         hidden_dim: int = 512,
+        pool: str = "mean",
     ):
         super().__init__()
+
+        # Visual pooling over the K Perceiver tokens. "mean" is the original
+        # behaviour; "attn" learns a per-token weight (softmax) so salient tokens
+        # dominate — usually a small AUROC gain. The mode is inferable from the
+        # state_dict (presence of vis_attn.*), so checkpoints stay self-describing.
+        self.pool = pool
+        if pool == "attn":
+            self.vis_attn = nn.Linear(llm_dim, 1)
 
         # Visual branch: normalise pooled Perceiver output
         self.vis_norm = nn.LayerNorm(llm_dim)
@@ -67,8 +76,14 @@ class ClassificationHead(nn.Module):
         rag_embeddings: torch.Tensor,  # (B, k, rag_dim)
     ) -> torch.Tensor:
         """Return raw logits of shape (B, 2). Index 0 = NORMAL, 1 = ABNORMAL."""
-        # Pool visual latents across K tokens
-        vis = self.vis_norm(perceiver_out.float().mean(dim=1))       # (B, D_llm)
+        # Pool visual latents across K tokens (mean, or learned attention)
+        po = perceiver_out.float()
+        if getattr(self, "pool", "mean") == "attn":
+            w = torch.softmax(self.vis_attn(po), dim=1)              # (B, K, 1)
+            pooled = (w * po).sum(dim=1)                             # (B, D_llm)
+        else:
+            pooled = po.mean(dim=1)                                  # (B, D_llm)
+        vis = self.vis_norm(pooled)                                  # (B, D_llm)
 
         # Project RAG embeddings to LLM dim, pool across k snippets
         rag = self.rag_norm(self.rag_proj(rag_embeddings.float()).mean(dim=1))  # (B, D_llm)
