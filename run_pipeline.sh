@@ -269,7 +269,7 @@ else
     wait_for_network
     python -m experiments.stage1_projector \
         --max-pairs        "$MAX_PAIRS_S1" \
-        --epochs           2 \
+        --epochs           3 \
         --lr               1e-4 \
         --warmup-steps     "$WARMUP_S1" \
         --grad-accum-steps "$GRAD_ACCUM" \
