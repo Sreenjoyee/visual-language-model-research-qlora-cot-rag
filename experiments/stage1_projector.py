@@ -57,6 +57,16 @@ from src.vision import VisionEncoder
 STAGE1_ALIGNMENT_TAG = "[STAGE1_ALIGNMENT]"
 
 
+def _proc_ram_gb() -> float:
+    """Resident RAM (RSS) of this process in GB — logged next to VRAM. 0.0 if
+    psutil is unavailable."""
+    try:
+        import psutil
+        return psutil.Process().memory_info().rss / (1024 ** 3)
+    except Exception:
+        return 0.0
+
+
 def _build_stage1_prompt(tokenizer) -> tuple[str, str]:
     """Build the chat-formatted prefix (ending with the assistant-open tag)
     and a trailing empty-string slot. Returns (prefix_text, suffix_text).
@@ -332,17 +342,19 @@ def train(
                     torch.cuda.memory_allocated(llm.device) / (1024 ** 3)
                     if llm.device.type == "cuda" else 0.0
                 )
+                ram_gb = _proc_ram_gb()
                 current_lr = scheduler.get_last_lr()[0]
                 row = {
                     "step": global_step, "epoch": epoch,
                     "loss": round(avg_loss, 4),
                     "lr": round(current_lr, 8),
                     "vram_gb": round(vram_gb, 2),
+                    "ram_gb": round(ram_gb, 2),
                     "elapsed_s": round(time.time() - t_start, 1),
                 }
                 print(
                     f"[stage1] step {global_step:5d} | loss {row['loss']:.4f} "
-                    f"| lr {current_lr:.2e} | vram {row['vram_gb']:.2f}GB"
+                    f"| lr {current_lr:.2e} | vram {row['vram_gb']:.2f}GB | ram {row['ram_gb']:.2f}GB"
                 )
                 log_f.write(json.dumps(row) + "\n")
                 log_f.flush()
@@ -359,6 +371,7 @@ def train(
             "loss": round(accum_loss / (micro_step % grad_accum_steps or grad_accum_steps), 4),
             "lr": round(scheduler.get_last_lr()[0], 8),
             "vram_gb": round(torch.cuda.memory_allocated(llm.device) / (1024 ** 3), 2) if llm.device.type == "cuda" else 0.0,
+            "ram_gb": round(_proc_ram_gb(), 2),
             "elapsed_s": round(time.time() - t_start, 1),
         }
         log_f.write(json.dumps(row) + "\n")

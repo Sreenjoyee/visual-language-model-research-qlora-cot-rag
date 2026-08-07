@@ -301,6 +301,16 @@ def _rotate_checkpoints_s2(parent_dir: Path, keep_last: int) -> None:
         print(f"[stage2] Rotated out old checkpoint → {d.name}  (keep_last={keep_last})")
 
 
+def _proc_ram_gb() -> float:
+    """Resident RAM (RSS) of this process in GB — logged next to VRAM. 0.0 if
+    psutil is unavailable."""
+    try:
+        import psutil
+        return psutil.Process().memory_info().rss / (1024 ** 3)
+    except Exception:
+        return 0.0
+
+
 def classification_loss(
     logits: torch.Tensor,
     target: torch.Tensor,
@@ -695,6 +705,7 @@ def train(
                     torch.cuda.memory_allocated(llm.device) / (1024 ** 3)
                     if llm.device.type == "cuda" else 0.0
                 )
+                ram_gb = _proc_ram_gb()
                 current_lr = scheduler.get_last_lr()[0]
                 elapsed = time.time() - t_start
                 steps_this_session = global_step - resume_step
@@ -711,6 +722,7 @@ def train(
                     "lr": round(current_lr, 8),
                     "label": pair.label,
                     "vram_gb": round(vram_gb, 2),
+                    "ram_gb": round(ram_gb, 2),
                     "elapsed_s": round(elapsed, 1),
                     "secs_per_step": round(secs_per_step, 1),
                     "eta_h": round(eta_h, 2),
@@ -722,6 +734,7 @@ def train(
                     f"| lr {current_lr:.2e} "
                     f"| {pair.label:<8} "
                     f"| vram {vram_gb:.2f}GB "
+                    f"| ram {ram_gb:.2f}GB "
                     f"| {secs_per_step:.0f}s/step "
                     f"| ETA {eta_h:.1f}h"
                 )
@@ -744,6 +757,7 @@ def train(
             "loss": round(accum_loss / (micro_step % grad_accum_steps or grad_accum_steps), 4),
             "lr": round(scheduler.get_last_lr()[0], 8),
             "vram_gb": round(torch.cuda.memory_allocated(llm.device) / (1024 ** 3), 2) if llm.device.type == "cuda" else 0.0,
+            "ram_gb": round(_proc_ram_gb(), 2),
             "elapsed_s": round(time.time() - t_start, 1),
         }
         log_f.write(json.dumps(row) + "\n")
