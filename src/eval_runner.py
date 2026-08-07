@@ -255,8 +255,10 @@ def run_eval_stream(
             break
 
         if is_cuda:
+            # Reset so max_memory_allocated tracks THIS sample's ABSOLUTE peak —
+            # resident model weights + activations — i.e. the true GPU footprint a
+            # deployment needs, not a marginal delta above the model baseline.
             torch.cuda.reset_peak_memory_stats(device)
-            mem_before = torch.cuda.memory_allocated(device)
 
         t0 = time.perf_counter()
         try:
@@ -271,9 +273,7 @@ def run_eval_stream(
         ram_gb = _proc_ram_gb()
         vram_peak_gb = 0.0
         if is_cuda:
-            vram_peak_gb = (
-                torch.cuda.max_memory_allocated(device) - mem_before
-            ) / (1024 ** 3)
+            vram_peak_gb = torch.cuda.max_memory_allocated(device) / (1024 ** 3)
 
         if diag.diagnosis in ("NORMAL", "ABNORMAL"):
             pred_label = diag.diagnosis

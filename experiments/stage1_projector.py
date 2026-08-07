@@ -68,6 +68,16 @@ def _proc_ram_gb() -> float:
         return 0.0
 
 
+def _disk_free_gb(path: str = ".") -> float:
+    """Free disk (GB) at `path` — logged so a filling /kaggle/working is visible
+    before it overflows. 0.0 on error."""
+    try:
+        import shutil
+        return shutil.disk_usage(path).free / (1024 ** 3)
+    except Exception:
+        return 0.0
+
+
 def _build_stage1_prompt(tokenizer) -> tuple[str, str]:
     """Build the chat-formatted prefix (ending with the assistant-open tag)
     and a trailing empty-string slot. Returns (prefix_text, suffix_text).
@@ -306,6 +316,10 @@ def train(
     accum_loss = 0.0          # for logging averaged grad-accum loss
     micro_step = 0            # counts individual forward passes within an accum window
 
+    if llm.device.type == "cuda":
+        # Peak VRAM measured from training start (model + optimizer + activations),
+        # excluding the transient model-loading/quantization spike.
+        torch.cuda.reset_peak_memory_stats(llm.device)
     for epoch in range(start_epoch, epochs):
         print(f"[stage1] === Epoch {epoch + 1}/{epochs} ===")
         optimizer.zero_grad(set_to_none=True)
@@ -361,10 +375,11 @@ def train(
 
             if global_step % log_every == 0:
                 vram_gb = (
-                    torch.cuda.memory_allocated(llm.device) / (1024 ** 3)
+                    torch.cuda.max_memory_allocated(llm.device) / (1024 ** 3)
                     if llm.device.type == "cuda" else 0.0
                 )
                 ram_gb = _proc_ram_gb()
+                disk_free_gb = _disk_free_gb()
                 current_lr = scheduler.get_last_lr()[0]
                 row = {
                     "step": global_step, "epoch": epoch,
@@ -372,11 +387,13 @@ def train(
                     "lr": round(current_lr, 8),
                     "vram_gb": round(vram_gb, 2),
                     "ram_gb": round(ram_gb, 2),
+                    "disk_free_gb": round(disk_free_gb, 1),
                     "elapsed_s": round(time.time() - t_start, 1),
                 }
                 print(
                     f"[stage1] step {global_step:5d} | loss {row['loss']:.4f} "
-                    f"| lr {current_lr:.2e} | vram {row['vram_gb']:.2f}GB | ram {row['ram_gb']:.2f}GB"
+                    f"| lr {current_lr:.2e} | vram {row['vram_gb']:.2f}GB | ram {row['ram_gb']:.2f}GB "
+                    f"| disk {row['disk_free_gb']:.1f}GB"
                 )
                 log_f.write(json.dumps(row) + "\n")
                 log_f.flush()
@@ -393,7 +410,7 @@ def train(
             "step": global_step, "epoch": epochs - 1,
             "loss": round(accum_loss / (micro_step % grad_accum_steps or grad_accum_steps), 4),
             "lr": round(scheduler.get_last_lr()[0], 8),
-            "vram_gb": round(torch.cuda.memory_allocated(llm.device) / (1024 ** 3), 2) if llm.device.type == "cuda" else 0.0,
+            "vram_gb": round(torch.cuda.max_memory_allocated(llm.device) / (1024 ** 3), 2) if llm.device.type == "cuda" else 0.0,
             "ram_gb": round(_proc_ram_gb(), 2),
             "elapsed_s": round(time.time() - t_start, 1),
         }

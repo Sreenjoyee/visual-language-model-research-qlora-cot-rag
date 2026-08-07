@@ -311,6 +311,16 @@ def _proc_ram_gb() -> float:
         return 0.0
 
 
+def _disk_free_gb(path: str = ".") -> float:
+    """Free disk (GB) at `path` — logged so a filling /kaggle/working is visible
+    before it overflows. 0.0 on error."""
+    try:
+        import shutil
+        return shutil.disk_usage(path).free / (1024 ** 3)
+    except Exception:
+        return 0.0
+
+
 def classification_loss(
     logits: torch.Tensor,
     target: torch.Tensor,
@@ -546,6 +556,13 @@ def train(
     # saved global_step and stop exactly at total_steps — no redoing a full epoch and
     # no overshooting the LR schedule. Each outer iteration is one fresh pass over the
     # interleaved stream; data cycles as needed until the step budget is met.
+    from collections import deque
+    _recent_correct: deque = deque(maxlen=200)   # rolling cls accuracy over recent samples
+    if llm.device.type == "cuda":
+        # Measure peak VRAM from training start so it reflects the true training
+        # footprint (model + optimizer + activations), excluding the transient
+        # model-loading/quantization spike.
+        torch.cuda.reset_peak_memory_stats(llm.device)
     while global_step < total_steps:
         epoch = min(global_step // steps_per_epoch, epochs - 1)   # 0-indexed, for display
         print(f"[stage2] === Data pass | epoch {epoch + 1}/{epochs} "
@@ -615,6 +632,8 @@ def train(
             # (cls_focal_gamma) to raise recall on abnormals — see classification_loss.
             label_tensor = torch.tensor([batch.label_id], device=llm.device)
             cls_logits = cls_head(batch.perceiver_out, batch.rag_embeddings)  # (1, 2)
+            with torch.no_grad():
+                _recent_correct.append(int(cls_logits.argmax(-1).item() == batch.label_id))
             cls_loss = classification_loss(
                 cls_logits,
                 label_tensor,
@@ -702,10 +721,12 @@ def train(
 
             if global_step % log_every == 0:
                 vram_gb = (
-                    torch.cuda.memory_allocated(llm.device) / (1024 ** 3)
+                    torch.cuda.max_memory_allocated(llm.device) / (1024 ** 3)
                     if llm.device.type == "cuda" else 0.0
                 )
                 ram_gb = _proc_ram_gb()
+                disk_free_gb = _disk_free_gb()
+                cls_acc = (sum(_recent_correct) / len(_recent_correct)) if _recent_correct else 0.0
                 current_lr = scheduler.get_last_lr()[0]
                 elapsed = time.time() - t_start
                 steps_this_session = global_step - resume_step
@@ -723,6 +744,8 @@ def train(
                     "label": pair.label,
                     "vram_gb": round(vram_gb, 2),
                     "ram_gb": round(ram_gb, 2),
+                    "disk_free_gb": round(disk_free_gb, 1),
+                    "cls_acc": round(cls_acc, 3),
                     "elapsed_s": round(elapsed, 1),
                     "secs_per_step": round(secs_per_step, 1),
                     "eta_h": round(eta_h, 2),
@@ -731,10 +754,12 @@ def train(
                     f"[stage2] step {global_step:5d}/{total_steps} "
                     f"| epoch {epoch + 1}/{epochs} "
                     f"| loss {avg_loss:.4f} (cls={avg_cls_loss:.4f} lm={avg_lm_loss:.4f}) "
+                    f"| acc {cls_acc:.2f} "
                     f"| lr {current_lr:.2e} "
                     f"| {pair.label:<8} "
                     f"| vram {vram_gb:.2f}GB "
                     f"| ram {ram_gb:.2f}GB "
+                    f"| disk {disk_free_gb:.1f}GB "
                     f"| {secs_per_step:.0f}s/step "
                     f"| ETA {eta_h:.1f}h"
                 )
@@ -756,7 +781,7 @@ def train(
             "step": global_step, "epoch": epochs - 1,
             "loss": round(accum_loss / (micro_step % grad_accum_steps or grad_accum_steps), 4),
             "lr": round(scheduler.get_last_lr()[0], 8),
-            "vram_gb": round(torch.cuda.memory_allocated(llm.device) / (1024 ** 3), 2) if llm.device.type == "cuda" else 0.0,
+            "vram_gb": round(torch.cuda.max_memory_allocated(llm.device) / (1024 ** 3), 2) if llm.device.type == "cuda" else 0.0,
             "ram_gb": round(_proc_ram_gb(), 2),
             "elapsed_s": round(time.time() - t_start, 1),
         }
