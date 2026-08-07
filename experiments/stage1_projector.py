@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -208,6 +209,26 @@ def _save_checkpoint(
     print(f"[stage1] Checkpoint saved → {path}  (step {step})")
 
 
+def _rotate_s1_checkpoints(save_dir: Path, keep_last: int) -> None:
+    """Delete all but the newest `keep_last` projector_step*.pt files. LOSSLESS:
+    Stage-1 uses no SWA and the final projector is saved separately (save_path), so
+    mid-training checkpoints are pure resume backups — dropping older ones removes
+    only redundant optimizer snapshots, never model weights or training signal.
+    keep_last<=0 disables rotation (keep all)."""
+    if keep_last <= 0:
+        return
+    def _step(p: Path) -> int:
+        m = re.match(r"projector_step(\d+)\.pt$", p.name)
+        return int(m.group(1)) if m else -1
+    cks = sorted((p for p in save_dir.glob("projector_step*.pt") if _step(p) >= 0), key=_step)
+    for p in cks[:-keep_last]:
+        try:
+            p.unlink()
+            print(f"[stage1] rotated out old checkpoint → {p.name}  (keep_last={keep_last})")
+        except OSError:
+            pass
+
+
 def train(
     config: Config,
     max_pairs: int,
@@ -219,6 +240,7 @@ def train(
     save_every: int = 500,
     resume_from: Path | None = None,
     grad_accum_steps: int = 1,
+    keep_last_checkpoints: int = 0,
 ) -> None:
     config.validate()
 
@@ -363,6 +385,7 @@ def train(
             if save_every > 0 and global_step % save_every == 0:
                 ckpt_path = save_path.parent / f"projector_step{global_step}.pt"
                 _save_checkpoint(ckpt_path, projector, optimizer, scheduler, global_step, epoch)
+                _rotate_s1_checkpoints(save_path.parent, keep_last_checkpoints)
 
     # Write final log row even if global_step never hit log_every (short runs)
     if global_step > 0:
@@ -391,6 +414,9 @@ def main() -> int:
     ap.add_argument("--max-pairs", type=int, default=5000,
                     help="Training pairs per epoch.")
     ap.add_argument("--epochs", type=int, default=1)
+    ap.add_argument("--keep-last-checkpoints", type=int, default=0,
+                    help="Keep only the newest N projector_step*.pt (0 = keep all). "
+                         "Lossless: Stage-1 has no SWA and the final projector is saved separately.")
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--log-every", type=int, default=25)
     ap.add_argument("--warmup-steps", type=int, default=100,
@@ -417,6 +443,7 @@ def main() -> int:
             save_every=args.save_every,
             resume_from=args.resume_from,
             grad_accum_steps=args.grad_accum_steps,
+            keep_last_checkpoints=args.keep_last_checkpoints,
         )
     except KeyboardInterrupt:
         print("\n[stage1] Interrupted by user.")

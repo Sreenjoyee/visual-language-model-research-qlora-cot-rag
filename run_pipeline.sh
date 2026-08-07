@@ -181,6 +181,7 @@ if [[ $SMOKE -eq 1 ]]; then
     EVAL_SAMPLES=4
     ROBUSTNESS_SAMPLES=2
     KEEP_LAST_S2=0  # smoke: tiny run, keep everything
+    KEEP_LAST_S1=0  # smoke: keep everything
     GRAD_ACCUM=1  # smoke: 2 pairs × 3 epochs = 6 steps; accum=1 ensures updates fire
     echo "[info] SMOKE mode — minimal 2-pair run for pipeline verification (CPU-safe)"
 else
@@ -188,11 +189,12 @@ else
     MAX_PAIRS_S2=4000
     WARMUP_S1=200
     WARMUP_S2=150
-    SAVE_EVERY_S1=500   # Stage 1: 2.6GB per checkpoint — every 500 steps = 5 checkpoints max
+    SAVE_EVERY_S1=500   # Stage 1: ~1.38GB per checkpoint (projector 460MB + AdamW state 920MB)
     SAVE_EVERY_S2=250   # Stage 2: ~100MB per checkpoint — every 250 steps to reduce storage
     EVAL_SAMPLES=200
     ROBUSTNESS_SAMPLES=50
     KEEP_LAST_S2=8  # Stage-2 disk cap: keep only newest 8 lora_step* ckpts (>= SWA --last-n 8)
+    KEEP_LAST_S1=2  # Stage-1 disk cap: newest 2 projector_step*.pt (no SWA; lossless — final projector saved separately). ~10×1.38GB would else overflow /kaggle/working
     GRAD_ACCUM=8  # RTX 3050 4GB: keeps per-step activation memory low
     MAX_PUBMED=5000
 fi
@@ -272,6 +274,7 @@ else
         --warmup-steps     "$WARMUP_S1" \
         --grad-accum-steps "$GRAD_ACCUM" \
         --save-every       "${SAVE_EVERY_S1:-500}" \
+        --keep-last-checkpoints "${KEEP_LAST_S1:-2}" \
         --log-every        25 \
         --save-path        "$PROJECTOR_PATH" \
         $RESUME_S1
