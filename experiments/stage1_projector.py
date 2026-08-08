@@ -320,6 +320,7 @@ def train(
         # Peak VRAM measured from training start (model + optimizer + activations),
         # excluding the transient model-loading/quantization spike.
         torch.cuda.reset_peak_memory_stats(llm.device)
+    _step0 = global_step   # step count at session start — for secs/step excluding resumed steps
     for epoch in range(start_epoch, epochs):
         print(f"[stage1] === Epoch {epoch + 1}/{epochs} ===")
         optimizer.zero_grad(set_to_none=True)
@@ -381,19 +382,26 @@ def train(
                 ram_gb = _proc_ram_gb()
                 disk_free_gb = _disk_free_gb()
                 current_lr = scheduler.get_last_lr()[0]
+                _elapsed = time.time() - t_start
+                _sps = _elapsed / max(global_step - _step0, 1)
+                _pct = min(100.0, 100.0 * global_step / max(total_steps, 1))
+                _eta_h = _sps * max(total_steps - global_step, 0) / 3600.0
                 row = {
-                    "step": global_step, "epoch": epoch,
+                    "step": global_step, "epoch": epoch, "epochs": epochs,
                     "loss": round(avg_loss, 4),
                     "lr": round(current_lr, 8),
                     "vram_gb": round(vram_gb, 2),
                     "ram_gb": round(ram_gb, 2),
                     "disk_free_gb": round(disk_free_gb, 1),
-                    "elapsed_s": round(time.time() - t_start, 1),
+                    "secs_per_step": round(_sps, 2),
+                    "eta_h": round(_eta_h, 2),
+                    "elapsed_s": round(_elapsed, 1),
                 }
                 print(
-                    f"[stage1] step {global_step:5d} | loss {row['loss']:.4f} "
-                    f"| lr {current_lr:.2e} | vram {row['vram_gb']:.2f}GB | ram {row['ram_gb']:.2f}GB "
-                    f"| disk {row['disk_free_gb']:.1f}GB"
+                    f"[stage1] ep {epoch + 1}/{epochs} | step {global_step:>5}/{total_steps} ({_pct:3.0f}%) "
+                    f"| loss {row['loss']:.4f} | lr {current_lr:.2e} "
+                    f"| vram {vram_gb:.1f} ram {ram_gb:.1f} disk {disk_free_gb:.0f} GB "
+                    f"| {_sps:.1f}s/it | ETA {_eta_h:.1f}h"
                 )
                 log_f.write(json.dumps(row) + "\n")
                 log_f.flush()

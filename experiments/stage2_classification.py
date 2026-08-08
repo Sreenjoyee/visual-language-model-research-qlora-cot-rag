@@ -750,18 +750,13 @@ def train(
                     "secs_per_step": round(secs_per_step, 1),
                     "eta_h": round(eta_h, 2),
                 }
+                _pct = min(100, int(100 * global_step / max(total_steps, 1)))
                 print(
-                    f"[stage2] step {global_step:5d}/{total_steps} "
-                    f"| epoch {epoch + 1}/{epochs} "
-                    f"| loss {avg_loss:.4f} (cls={avg_cls_loss:.4f} lm={avg_lm_loss:.4f}) "
-                    f"| acc {cls_acc:.2f} "
-                    f"| lr {current_lr:.2e} "
-                    f"| {pair.label:<8} "
-                    f"| vram {vram_gb:.2f}GB "
-                    f"| ram {ram_gb:.2f}GB "
-                    f"| disk {disk_free_gb:.1f}GB "
-                    f"| {secs_per_step:.0f}s/step "
-                    f"| ETA {eta_h:.1f}h"
+                    f"[stage2] ep {epoch + 1}/{epochs} | step {global_step:>5}/{total_steps} ({_pct:3d}%) "
+                    f"| loss {avg_loss:.4f} (cls {avg_cls_loss:.3f} lm {avg_lm_loss:.3f}) | acc {cls_acc:.2f} "
+                    f"| lr {current_lr:.2e} | {pair.label:<8} "
+                    f"| vram {vram_gb:.1f} ram {ram_gb:.1f} disk {disk_free_gb:.0f} GB "
+                    f"| {secs_per_step:.1f}s/it | ETA {eta_h:.1f}h"
                 )
                 log_f.write(json.dumps(row) + "\n")
                 log_f.flush()
