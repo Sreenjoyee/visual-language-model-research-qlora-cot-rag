@@ -507,17 +507,35 @@ def train(
         train_state = resume_from / "train_state.pt"
         if train_state.exists():
             ckpt = torch.load(train_state, map_location="cpu")
-            optimizer.load_state_dict(ckpt["optimizer"])
-            scheduler.load_state_dict(ckpt["scheduler"])
             global_step  = ckpt["step"]
             start_epoch  = ckpt["epoch"]
+            try:
+                optimizer.load_state_dict(ckpt["optimizer"])
+                scheduler.load_state_dict(ckpt["scheduler"])
+            except (ValueError, KeyError, RuntimeError) as _e:
+                # Optimizer/scheduler state doesn't match the current model — almost always
+                # because the cls_head architecture changed between runs (e.g. mean vs
+                # attention pooling changes the param count). Fall back to a FRESH optimizer
+                # and fast-forward the LR schedule to the resumed step. Only the optimizer
+                # momentum is lost (rebuilds within a few steps); the LoRA + cls_head weights
+                # and the step/epoch counters still resume, so no real training is lost.
+                print(f"[stage2] WARNING: optimizer state incompatible ({type(_e).__name__}); "
+                      f"using a FRESH optimizer + fast-forwarding LR to step {global_step}. "
+                      f"(Usually a cls_head pooling change — mean vs attn.)")
+                for _ in range(global_step):
+                    scheduler.step()
             print(f"[stage2] Resumed from {resume_from}  (step={global_step}, epoch={start_epoch})")
         else:
             print(f"[stage2] WARNING: resume_from given but no train_state.pt found at {resume_from}")
         # Restore ClassificationHead weights if they exist alongside the LoRA checkpoint
         if config.cls_head_path.exists():
-            cls_head.load_state_dict(torch.load(config.cls_head_path, map_location="cpu"))
-            print(f"[stage2] ClassificationHead weights restored from {config.cls_head_path}")
+            _miss, _unexp = cls_head.load_state_dict(
+                torch.load(config.cls_head_path, map_location="cpu"), strict=False)
+            if _miss or _unexp:
+                print(f"[stage2] ClassificationHead partial restore (arch changed): "
+                      f"missing={list(_miss)} unexpected={list(_unexp)} — new params keep init.")
+            else:
+                print(f"[stage2] ClassificationHead weights restored from {config.cls_head_path}")
 
     log_path = config.logs_dir / "stage2.jsonl"
     log_mode = "a" if resume_from is not None else "w"
