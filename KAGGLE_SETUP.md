@@ -1,119 +1,64 @@
-# Kaggle Setup — Resume Stage 2 Training from Step 2000
+# Kaggle Setup — background training on a T4 (laptop can be off)
 
-Kaggle gives **30 GPU hours/week for free** (P100 16 GB or T4 16 GB).
-Sessions last up to **12 hours** before auto-disconnect.
-At estimated ~6–10 hours per run on a P100.
+All training runs on Kaggle through **`kaggle_train_fresh.ipynb`**. It trains the full
+pipeline from scratch (FAISS → Stage-1 projector → Stage-2 LoRA + cls_head → eval →
+experiments → plots) under a **hard 6 GB VRAM cap**. It resumes automatically across runs.
 
----
+## Why the laptop can be off
 
-## Kaggle vs RunPod — Key Differences
+Kaggle has two ways to run a notebook:
 
-| | RunPod | Kaggle |
+| | Interactive session (running cells) | **Commit run (Save Version → Save & Run All)** |
 |---|---|---|
-| Cost | ~$0.13/hr | Free (30 hr/wk) |
-| GPU (typical) | RTX 3090 (24 GB) | P100 or T4 (16 GB) |
-| Session limit | Until you stop | 12 hrs/session |
-| File system | Persistent `/workspace/` | Ephemeral `/kaggle/working/` — auto-saved on exit |
-| Secrets | `.env` file | Kaggle Secrets (Add-ons menu) |
-| Internet | Yes | Yes (must enable per notebook) |
+| Needs the browser open | Yes; stops when the tab closes or sits idle | **No.** Runs on Kaggle's servers |
+| Max length | 12 h | 12 h |
+| Use for | quick debugging | **all training** |
 
----
+The notebook stops itself at 11 h (`TIME_BUDGET_H`), uploads its checkpoints, and exits
+before Kaggle's 12 h kill. To continue training, start another commit run.
 
-## 1. One-Time Kaggle Setup
+## One-time setup
 
-### 1a. Create a Kaggle account
-Go to [kaggle.com](https://www.kaggle.com) and sign up.
+1. **Secrets** (Add-ons → Secrets, then tick each one for this notebook):
+   - `HF_TOKEN`: HuggingFace token with LLaMA-3.2 access
+   - `KAGGLE_KEY`: Kaggle API token (`KGAT_…`) for the account in `KAGGLE_USERNAME`
+   - `SEMANTIC_SCHOLAR_API_KEY`: optional
+2. **Import** `kaggle_train_fresh.ipynb` (File → Import Notebook).
+3. **Settings:** Accelerator = **GPU T4**, Internet = **On**.
+4. **Add Input** (avoids HuggingFace Xet 403s on Kaggle):
+   - Model: Llama 3.2 → 3B-Instruct (transformers)
+   - `raddar/chest-xrays-indiana-university`
+   - `paultimothymooney/chest-xray-pneumonia`
+   - optional: an old dataset containing `faiss_index/`. This is the text retrieval index,
+     not trained weights. Reusing it skips about 1 h of index building.
+5. Make sure the GitHub repo has the latest commit. The notebook clones it and refuses to
+   train if `src/config.py` lacks the 6 GB cap (`MEDDIAG_VRAM_CAP_GB`).
 
-### 1b. Add your secrets
-1. Open any notebook → **Add-ons** (top menu) → **Secrets**
-2. Add two secrets:
+## Each training run
 
-| Label | Value |
-|---|---|
-| `HF_TOKEN` | Your HuggingFace access token (needs LLaMA-3.2 access) |
-| `SEMANTIC_SCHOLAR_API_KEY` | Your Semantic Scholar key |
+**Save Version → Save & Run All (Commit) → Save.** Then you can close the tab and shut the
+laptop down.
 
-These persist across all your notebooks — you only do this once.
+- **First run:** the state dataset (`meddiag-fresh-t4`) doesn't exist yet, so the run starts
+  from scratch. The first upload creates the dataset.
+- **Later runs:** the notebook downloads the **latest** dataset version through the API, so
+  you don't need to attach or update it. Training resumes from the last checkpoint.
+- Checkpoints upload every 20 min. A crash or kill loses at most one checkpoint interval
+  (250 steps in Stage-2, 500 in Stage-1).
+- **Done** when the log prints `ALL STAGES COMPLETE`.
 
-### 1c. Upload model weights as a Kaggle Dataset
+Watch progress from any device: Your Work → the notebook → **Versions** → the running
+version. The `vram_gb` field in the stage logs is the peak VRAM and must stay under 6.
 
-The checkpoint files are too large for GitHub. Upload them once as a private Kaggle Dataset so every session can load them instantly.
+## The 6 GB constraint on a 16 GB T4
 
-1. Go to [kaggle.com/datasets](https://www.kaggle.com/datasets) → **New Dataset**
-2. Name it `meddiag-weights` (private)
-3. Upload a zip containing:
-   ```
-   projector_stage1.pt
-   cls_head.pt
-   lora_step2000/
-       adapter_config.json
-       adapter_model.safetensors
-       train_state.pt
-   faiss_index/
-       ...all files...
-   ```
-4. Click **Create** — Kaggle processes and stores it permanently.
+The notebook sets `MEDDIAG_VRAM_CAP_GB=6`. When any process imports `src/config.py`, this
+calls `torch.cuda.set_per_process_memory_fraction`, so a step that would need more than
+6 GB fails with CUDA OOM instead of quietly using the T4's extra memory. Before training
+starts, cell 6 confirms the cap by trying a 7 GB allocation in a child process; that
+allocation must fail.
 
-> **Alternative:** Use `gdown` each session to re-download from Google Drive.
-> This wastes ~10 minutes per session. The Kaggle Dataset approach is much faster.
+## Quota
 
----
-
-## 2. Create the Training Notebook
-
-1. Go to [kaggle.com/code](https://www.kaggle.com/code) → **New Notebook**
-2. Click **File** → **Import Notebook** → upload `MEDDIAG_Kaggle_Training.ipynb` from this repo
-3. In the right panel:
-   - **Accelerator** → `GPU P100` (or `T4 x2` if available — uses only cuda:0)
-   - **Internet** → `On`
-4. Click **Add Data** → search for `meddiag-weights` (your dataset from step 1c)
-   - This mounts it at `/kaggle/input/meddiag-weights/`
-5. In **Add-ons** → **Secrets** → toggle on `HF_TOKEN` and `SEMANTIC_SCHOLAR_API_KEY`
-
----
-
-## 3. Run Training
-
-Open `MEDDIAG_Kaggle_Training.ipynb` and run cells top to bottom.
-
-The training cell will stream output directly. It blocks until completion or session timeout.
-Kaggle auto-saves everything in `/kaggle/working/` when the session ends.
-
----
-
-## 4. Resume After Session Timeout (Multi-Session Workflow)
-
-After a session ends (auto or manual):
-
-1. Go to your notebook → **Output** tab → find the saved files
-2. Click **Create Dataset from Output** → name it `meddiag-ckpt-stepXXXX`
-3. Start a **new session** of the same notebook
-4. **Add Data** → add `meddiag-ckpt-stepXXXX` as input
-5. The notebook will auto-detect the latest checkpoint from that input dataset and resume
-
-The notebook's resume cell handles this automatically — just run all cells as normal.
-
----
-
-## 5. Training Time Estimate
-
-| Stage | Steps | Estimated Time (P100) |
-|---|---|---|
-| Remaining from step 2000 | ~5 500 | 6–10 hours |
-| Full run if starting fresh | ~7 500 | 9–14 hours |
-
-With 30 hrs/week you should finish in **1 week of normal usage** even with re-downloads.
-
----
-
-## Tips
-
-- **Don't close the browser tab while training** — Kaggle may suspend idle sessions.
-  Open the notebook in a tab and leave it visible.
-- **Early checkpoint saving** — the script saves every 250 steps.
-  Even a 4-hour session completes ~1 000 steps before disconnect.
-- **P100 vs T4** — P100 is generally faster for this model. Pick it when available.
-- **bitsandbytes on Kaggle** — uses CUDA 12.x. The pinned version (0.49.2) is verified
-  compatible. Do not upgrade without testing.
-- **After all training** — download the `reports/` and `logs/` folders from the
-  Output tab, or save them to your Kaggle Dataset for permanent storage.
+Kaggle gives about 30 GPU-hours per week, which is 2–3 runs. Restarting completely: set
+`FORCE_FRESH = True` for one run, then set it back to `False`.

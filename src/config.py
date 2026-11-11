@@ -205,5 +205,33 @@ class Config:
             d.mkdir(parents=True, exist_ok=True)
 
 
+def _apply_vram_cap() -> None:
+    """Hard VRAM ceiling for THIS process when MEDDIAG_VRAM_CAP_GB is set.
+
+    The project targets 6 GB consumer GPUs. On a bigger card (Kaggle T4 = 16 GB)
+    `max_vram_gb` only limits where the LLM weights are placed; activations,
+    optimizer state and the vision encoder could still grow past 6 GB unnoticed.
+    This caps PyTorch's caching allocator so any step that would need more than
+    the budget raises CUDA OOM instead of silently using the extra memory.
+    No-op when the env var is unset, torch is missing, or there is no GPU.
+    """
+    cap = os.environ.get("MEDDIAG_VRAM_CAP_GB")
+    if not cap:
+        return
+    try:
+        import torch
+    except ImportError:
+        return
+    if not torch.cuda.is_available():
+        return
+    dev = os.environ.get("MEDDIAG_DEVICE", "cuda:0")
+    idx = int(dev.split(":")[1]) if ":" in dev else 0
+    total_gb = torch.cuda.get_device_properties(idx).total_memory / (1024 ** 3)
+    frac = min(1.0, float(cap) / total_gb)
+    torch.cuda.set_per_process_memory_fraction(frac, idx)
+
+
+_apply_vram_cap()
+
 # Module-level singleton for convenience. Import and call .validate() at entry points.
 CONFIG = Config()
