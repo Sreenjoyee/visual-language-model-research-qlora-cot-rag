@@ -328,6 +328,7 @@ def classification_loss(
     pos_weight: float = 1.0,
     focal_gamma: float = 0.0,
     label_smoothing: float = 0.1,
+    normal_weight: float = 1.0,
 ) -> torch.Tensor:
     """Recall-oriented classification loss (Run 4).
 
@@ -339,11 +340,14 @@ def classification_loss(
         batch is a single sample (Stage 2 trains batch-size-1 with grad accum).
       - focal_gamma > 0 applies focal modulation (1 - p_true)^gamma, concentrating
         the gradient on hard / confidently-misclassified examples.
+      - normal_weight scales the loss on NORMAL (class id 0) samples. The MEDDIAG
+        paper (§3.9, Table 2) uses class weights NORMAL=2.0 / ABNORMAL=1.0, i.e.
+        normal_weight=2.0, pos_weight=1.0, focal_gamma=0, label_smoothing=0.
     """
     w = torch.where(
         target == 1,
         torch.as_tensor(pos_weight, device=logits.device, dtype=logits.dtype),
-        torch.as_tensor(1.0, device=logits.device, dtype=logits.dtype),
+        torch.as_tensor(normal_weight, device=logits.device, dtype=logits.dtype),
     )
     if focal_gamma and focal_gamma > 0.0:
         logp = F.log_softmax(logits, dim=-1)
@@ -451,8 +455,9 @@ def train(
         rag_dim=config.embedder_dim,
         hidden_dim=config.cls_hidden_dim,
         pool=config.cls_pool,
+        arch=config.cls_arch,
     )
-    print(f"[stage2] ClassificationHead pooling = {config.cls_pool}")
+    print(f"[stage2] ClassificationHead arch = {config.cls_arch}, pooling = {config.cls_pool}")
     cls_head.to(llm.device)
     cls_head.train()
 
@@ -489,9 +494,11 @@ def train(
         weight_decay=0.01,
     )
 
-    # Each MIMIC pair yields 5 samples when all supplemental sources are loaded:
-    # 1 MIMIC + 1 IU-Normal + 1 IU-Abnormal + 1 Kermany-Normal + 1 Kermany-Abnormal
-    _interleave_factor = 5
+    # Samples per MIMIC pair in the interleaved stream: 1 MIMIC, +2 with IU-Xray
+    # (normal+abnormal), +2 with Kermany. MIMIC-only (paper default) = 1, so an
+    # "epoch" is exactly one pass over max_pairs MIMIC pairs.
+    _extra_src = config.stage2_extra_sources
+    _interleave_factor = 1 + 2 * ("iu" in _extra_src) + 2 * ("kermany" in _extra_src)
     steps_per_epoch = max(1, max_pairs * _interleave_factor // max(grad_accum_steps, 1))
     total_steps = epochs * steps_per_epoch
     scheduler = get_cosine_schedule_with_warmup(
@@ -563,11 +570,26 @@ def train(
             print(f"[stage2] {label} UNAVAILABLE ({type(e).__name__}: {e}) — continuing without it")
             return []
 
-    print("[stage2] Pre-loading supplemental sources (IU-Xray + Kermany)...")
-    iu_xray_normals: list[LabeledPair]     = _safe_preload(lambda: iu_xray_normal_training_stream(max_samples=2000), "IU-Xray NORMAL")
-    iu_xray_abnormals: list[LabeledPair]   = _safe_preload(lambda: iu_xray_abnormal_training_stream(max_samples=500), "IU-Xray ABNORMAL")
-    pneumonia_normals: list[LabeledPair]   = _safe_preload(lambda: pneumonia_xray_stream(label="NORMAL", max_samples=400), "Kermany NORMAL")
-    pneumonia_abnormals: list[LabeledPair] = _safe_preload(lambda: pneumonia_xray_stream(label="ABNORMAL", max_samples=400), "Kermany ABNORMAL")
+    # Paper §3.9/§4.1: Stage-2 trains on MIMIC-CXR, and RQ4 evaluates IU X-ray as
+    # OUT-of-distribution "without domain-specific fine-tuning" (IU-Xray NORMALs are
+    # also the Exp 4A probe set). So supplemental sources are OFF by default and must
+    # be requested explicitly: MEDDIAG_S2_EXTRA_SOURCES="iu,kermany" (not the paper's method).
+    _extra = config.stage2_extra_sources
+    iu_xray_normals: list[LabeledPair] = []
+    iu_xray_abnormals: list[LabeledPair] = []
+    pneumonia_normals: list[LabeledPair] = []
+    pneumonia_abnormals: list[LabeledPair] = []
+    if _extra:
+        print(f"[stage2] WARNING: supplemental training sources {sorted(_extra)} enabled — "
+              f"deviates from the paper (MIMIC-only Stage-2).")
+    else:
+        print("[stage2] Training data: MIMIC-CXR only (paper). Supplemental sources off.")
+    if "iu" in _extra:
+        iu_xray_normals   = _safe_preload(lambda: iu_xray_normal_training_stream(max_samples=2000), "IU-Xray NORMAL")
+        iu_xray_abnormals = _safe_preload(lambda: iu_xray_abnormal_training_stream(max_samples=500), "IU-Xray ABNORMAL")
+    if "kermany" in _extra:
+        pneumonia_normals   = _safe_preload(lambda: pneumonia_xray_stream(label="NORMAL", max_samples=400), "Kermany NORMAL")
+        pneumonia_abnormals = _safe_preload(lambda: pneumonia_xray_stream(label="ABNORMAL", max_samples=400), "Kermany ABNORMAL")
 
     # Step-budget loop (resume-safe): train until global_step reaches total_steps,
     # regardless of how many data passes that takes. On resume we continue from the
@@ -643,11 +665,9 @@ def train(
                 print(f"[stage2] step {global_step}: non-finite lm_loss, skipping")
                 continue
 
-            # Classification loss. The interleaved stream is balanced 1:1, so by
-            # default this is plain label-smoothed CE (label smoothing curbs
-            # overconfidence and improves OOD calibration). Run 4 can up-weight the
-            # ABNORMAL class (cls_pos_weight) and/or enable focal loss
-            # (cls_focal_gamma) to raise recall on abnormals — see classification_loss.
+            # Classification loss. Defaults follow the paper (§3.9 / Table 2):
+            # class-weighted CE with NORMAL=2.0 / ABNORMAL=1.0, no focal term, no
+            # label smoothing. All knobs are env-overridable via src/config.py.
             label_tensor = torch.tensor([batch.label_id], device=llm.device)
             cls_logits = cls_head(batch.perceiver_out, batch.rag_embeddings)  # (1, 2)
             with torch.no_grad():
@@ -656,8 +676,9 @@ def train(
                 cls_logits,
                 label_tensor,
                 pos_weight=config.cls_pos_weight,
+                normal_weight=config.cls_normal_weight,
                 focal_gamma=config.cls_focal_gamma,
-                label_smoothing=0.1,
+                label_smoothing=config.cls_label_smoothing,
             )
 
             if not torch.isfinite(cls_loss):

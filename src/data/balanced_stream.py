@@ -41,19 +41,21 @@ class LabeledPair:
     source: str = "mimic-cxr"
 
 
-def _raw_mimic_stream(config: Config, split: str) -> Iterator[dict]:
+def _raw_mimic_stream(config: Config, split: str, part: str = "train") -> Iterator[dict]:
     """Yield raw HF dataset examples, with retry on disconnect."""
     from datasets import load_dataset
 
     def _factory():
-        return iter(
+        from .mimic_split import mimic_part
+        return iter(mimic_part(
             load_dataset(
                 config.mimic_dataset_repo,
                 split=split,
                 streaming=True,
                 token=config.hf_token or None,
-            )
-        )
+            ),
+            part, config.mimic_holdout_start,
+        ))
 
     yield from retrying_iter(_factory)
 
@@ -82,6 +84,7 @@ def balanced_mimic_stream(
     max_pairs: int | None = None,
     buffer_per_class: int = 128,
     imbalance_warn_threshold: float = 3.0,
+    part: str = "train",
 ) -> Iterator[LabeledPair]:
     """Stream balanced (NORMAL, ABNORMAL) LabeledPairs from MIMIC-CXR.
 
@@ -91,6 +94,7 @@ def balanced_mimic_stream(
         max_pairs: Stop after yielding this many pairs (None = run to exhaustion).
         buffer_per_class: Max queued samples per class before back-pressure.
         imbalance_warn_threshold: Warn if skipped:yielded ratio exceeds this.
+        part: "train" (training) or "heldout" (evaluation only) — src/data/mimic_split.py.
 
     Yields:
         LabeledPair — alternating NORMAL / ABNORMAL with strict 1:1 balance.
@@ -109,7 +113,7 @@ def balanced_mimic_stream(
     # Counters for imbalance monitoring
     seen = {"NORMAL": 0, "ABNORMAL": 0, "skipped": 0}
 
-    stream = _raw_mimic_stream(config, split)
+    stream = _raw_mimic_stream(config, split, part)
     schema_checked = False
     total_yielded = 0
 

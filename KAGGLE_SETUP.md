@@ -1,64 +1,67 @@
-# Kaggle Setup — background training on a T4 (laptop can be off)
+# Kaggle Setup — training runs on Kaggle, your laptop can be off
 
-All training runs on Kaggle through **`kaggle_train_fresh.ipynb`**. It trains the full
-pipeline from scratch (FAISS → Stage-1 projector → Stage-2 LoRA + cls_head → eval →
-experiments → plots) under a **hard 6 GB VRAM cap**. It resumes automatically across runs.
+All training runs on Kaggle with **`kaggle_train_fresh.ipynb`**. It trains the MEDDIAG
+pipeline from scratch, exactly as described in the paper:
+1. FAISS knowledge base over MIMIC-CXR reports
+2. Stage-1 projector
+3. Stage-2 QLoRA + classification head
+4. Evaluation, all 9 experiments, and plots
+
+GPU memory is held to a **hard 6 GB VRAM budget**. Runs resume and chain automatically.
+
+**It works from any laptop and any Kaggle account.** Nothing is tied to a person:
+- the Kaggle username and the notebook's name are detected from your API key
+- the model and datasets download from HuggingFace
+- checkpoints go to a dataset in whichever account runs it
+
+The laptop is only needed to click **Save & Run All** once.
+
+The step-by-step instructions (plain language) are at the top of the notebook itself.
+Short version:
+
+1. **Import** the notebook on kaggle.com (any name). Settings: **GPU T4 x2**, **Internet On**.
+2. **Secrets:** `HF_TOKEN` and `KAGGLE_KEY` (see `secrets.md`). Tick both for this notebook.
+   Your HuggingFace account must have accepted the
+   [Llama-3.2-3B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct) licence.
+3. **Attach nothing.** The model and all datasets come from HuggingFace.
+4. Click **Save Version → Save & Run All (Commit) → Save**, then close the laptop.
 
 ## Why the laptop can be off
 
-Kaggle has two ways to run a notebook:
-
-| | Interactive session (running cells) | **Commit run (Save Version → Save & Run All)** |
+| | Interactive session (▶ running cells) | **Commit run (Save & Run All)** |
 |---|---|---|
-| Needs the browser open | Yes; stops when the tab closes or sits idle | **No.** Runs on Kaggle's servers |
+| Needs the browser open | yes; stops when the tab closes or sits idle | **no**, runs on Kaggle's servers |
 | Max length | 12 h | 12 h |
-| Use for | quick debugging | **all training** |
 
-The notebook stops itself at 11 h (`TIME_BUDGET_H`), uploads its checkpoints, and exits
-before Kaggle's 12 h kill. To continue training, start another commit run.
+Each run stops itself at 11 h (`TIME_BUDGET_H`) and uploads everything to
+`<your-username>/meddiag-fresh-t4`. It then waits until that upload has finished processing
+and **starts the next run by itself**. The next run downloads the latest save and continues
+from the last checkpoint. Checkpoints also upload every 20 minutes, so a crash loses at most
+~20 minutes of work.
 
-## One-time setup
+The chain stops on its own in three cases:
+- **Everything is done:** the log says `ALL STAGES COMPLETE`.
+- **The weekly GPU quota ran out** (~30 h/week). Click Save & Run All once after the weekly reset.
+- **A run made no progress**, i.e. something is broken. Read the error at the end of its log.
 
-1. **Secrets** (Add-ons → Secrets, then tick each one for this notebook):
-   - `HF_TOKEN`: HuggingFace token with LLaMA-3.2 access
-   - `KAGGLE_KEY`: Kaggle API token (`KGAT_…`) for the account in `KAGGLE_USERNAME`
-   - `SEMANTIC_SCHOLAR_API_KEY`: optional
-2. **Import** `kaggle_train_fresh.ipynb` (File → Import Notebook).
-3. **Settings:** Accelerator = **GPU T4**, Internet = **On**.
-4. **Add Input** (avoids HuggingFace Xet 403s on Kaggle):
-   - Model: Llama 3.2 → 3B-Instruct (transformers)
-   - `raddar/chest-xrays-indiana-university`
-   - `paultimothymooney/chest-xray-pneumonia`
-   - optional: an old dataset containing `faiss_index/`. This is the text retrieval index,
-     not trained weights. Reusing it skips about 1 h of index building.
-5. Make sure the GitHub repo has the latest commit. The notebook clones it and refuses to
-   train if `src/config.py` lacks the 6 GB cap (`MEDDIAG_VRAM_CAP_GB`).
+## Where the results are
 
-## Each training run
+In the `meddiag-fresh-t4` dataset:
+- `results/experiments/<date_time>/`: Exp 1–9 results (`expN_results.json` + plots), kept in a separate folder
+- `lora_adapter/`, `cls_head.pt`, `projector_stage1.pt`: the trained model
+- `eval_report_*.json`, `diagnostics/`: the evaluation report and plots
 
-**Save Version → Save & Run All (Commit) → Save.** Then you can close the tab and shut the
-laptop down.
+## Held to the paper
 
-- **First run:** the state dataset (`meddiag-fresh-t4`) doesn't exist yet, so the run starts
-  from scratch. The first upload creates the dataset.
-- **Later runs:** the notebook downloads the **latest** dataset version through the API, so
-  you don't need to attach or update it. Training resumes from the last checkpoint.
-- Checkpoints upload every 20 min. A crash or kill loses at most one checkpoint interval
-  (250 steps in Stage-2, 500 in Stage-1).
-- **Done** when the log prints `ALL STAGES COMPLETE`.
+| Paper | Where it is enforced |
+|---|---|
+| ≤ 6 GB VRAM (hard ceiling, even on a 16 GB T4) | `MEDDIAG_VRAM_CAP_GB` → `src/config.py`; cell 6 proves it before training |
+| Frozen DenseNet-121, 8 visual tokens × 3072, NF4 LLaMA-3.2-3B + bf16 | `src/config.py`, `src/llm.py` |
+| Knowledge base = MIMIC-CXR report text, ≤ 20k, MiniLM + IndexFlatL2, k = 5 | `scripts/build_faiss_index.py --kb paper` |
+| Head: concat(3072 visual, 384 RAG) → 512 → GELU → 2, mean pooling | `src/classification_head.py` (`arch="paper"`) |
+| Class-weighted CE NORMAL 2.0 / ABNORMAL 1.0, λ 0.65/0.35, LoRA 16/32/0.05 q,k,v,o, LR 2e-4 (input_norm 2e-5), AdamW 0.01, warm-up 100 + cosine, clip 1.0, adversarial P = 0.20 | `experiments/stage2_classification.py`, `run_pipeline.sh` |
+| Stage-2 trained on MIMIC-CXR only (IU X-ray stays out-of-distribution, RQ4) | `MEDDIAG_S2_EXTRA_SOURCES` empty by default |
+| Held-out in-distribution evaluation | MIMIC rows ≥ 27,000 reserved for evaluation (`src/data/mimic_split.py`) |
+| Exp 6: raw ECE + temperature-scaled ECE on a held-out calibration split | `experiments/run_experiments.py` |
 
-Watch progress from any device: Your Work → the notebook → **Versions** → the running
-version. The `vram_gb` field in the stage logs is the peak VRAM and must stay under 6.
-
-## The 6 GB constraint on a 16 GB T4
-
-The notebook sets `MEDDIAG_VRAM_CAP_GB=6`. When any process imports `src/config.py`, this
-calls `torch.cuda.set_per_process_memory_fraction`, so a step that would need more than
-6 GB fails with CUDA OOM instead of quietly using the T4's extra memory. Before training
-starts, cell 6 confirms the cap by trying a 7 GB allocation in a child process; that
-allocation must fail.
-
-## Quota
-
-Kaggle gives about 30 GPU-hours per week, which is 2–3 runs. Restarting completely: set
-`FORCE_FRESH = True` for one run, then set it back to `False`.
+`tests/test_paper_compliance.py` pins all of these.

@@ -14,6 +14,7 @@ from typing import Iterator
 from PIL import Image
 
 from .data.balanced_stream import LabeledPair
+from .data.labeler import assign_label
 
 _NET_ERRORS = (ConnectionError, OSError, TimeoutError, BrokenPipeError)
 
@@ -110,68 +111,16 @@ def nih_stream(
 # ── IU-Xray NORMAL-only stream ────────────────────────────────────────────────
 
 def iu_xray_normal_stream(max_samples: int = 50) -> Iterator[LabeledPair]:
-    """Confirmed-NORMAL IU-Xray samples for adversarial sycophancy probing (Exp 4A).
-
-    Filters conservatively: report must contain 'normal' AND contain none of the
-    common pathology keywords — ensuring ground-truth NORMAL label is reliable.
-    """
-    _REPOS = [
-        ("ChayanM/IUXray-Data-Train-Test", "train"),
-        ("projectnateryan/iu_xray", "train"),
-        ("Soobin-Kim/iu_xray", "train"),
-        ("openi/chest-xray", "train"),
-    ]
-    _PATHOLOGY = {
-        "pneumonia", "effusion", "cardiomegaly", "pneumothorax",
-        "atelectasis", "consolidation", "opacity", "infiltrate",
-    }
-    ds = None
-    loaded_repo = loaded_split = None
-    last_err: Exception | None = None
-    for repo, repo_split in _REPOS:
-        try:
-            ds = _retry_load(repo, repo_split)
-            loaded_repo, loaded_split = repo, repo_split
-            print(f"[iu_xray_normal_stream] loaded '{repo}'")
-            break
-        except Exception as e:
-            last_err = e
-
-    if ds is None:
-        raise RuntimeError(f"Could not load IU-Xray. Last error: {last_err}")
-
-    count = 0
-    retry_delay = 30
-    while True:
-        try:
-            stream = ds.skip(count) if count > 0 else ds
-            for ex in stream:
-                if count >= max_samples:
-                    return
-                report = str(
-                    ex.get("Caption") or ex.get("impression") or
-                    ex.get("findings") or ex.get("report") or ""
-                ).lower()
-                if not report or "normal" not in report:
-                    continue
-                if any(p in report for p in _PATHOLOGY):
-                    continue
-                try:
-                    raw_img = ex.get("image") or ex.get("jpg")
-                    img = _to_pil(raw_img) if raw_img is not None else Image.new("RGB", (224, 224))
-                except Exception:
-                    continue
-                yield LabeledPair(image=img, report=report, label="NORMAL", source="iu-xray")
-                count += 1
-            return
-        except _NET_ERRORS as e:
-            print(f"[iu_xray_normal_stream] Network error at sample {count}: {e}. Reconnecting in {retry_delay}s...")
-            time.sleep(retry_delay)
-            retry_delay = min(retry_delay * 2, 300)
-            try:
-                ds = _retry_load(loaded_repo, loaded_split)
-            except Exception:
-                pass
+    """Confirmed-NORMAL IU-Xray cases with REAL frontal images for the adversarial
+    sycophancy probe (Exp 4A, paper §4.4). Normal = native Open-I label "normal"
+    AND the negation-aware report labeler agree. See src/data/iu_xray_stream.py."""
+    from .data.iu_xray_stream import iu_hf_labeled_stream
+    n = 0
+    for pair in iu_hf_labeled_stream("NORMAL", max_samples, "iu_xray_normal_stream", "iu-xray"):
+        n += 1
+        yield pair
+    if n == 0:
+        raise RuntimeError("No IU-Xray mirror with images is reachable — Exp 4A cannot run.")
 
 
 # ── PadChest OOD stream ───────────────────────────────────────────────────────
@@ -262,20 +211,24 @@ def mimic_eval_stream(
     split: str = "train",
 ) -> Iterator[LabeledPair]:
     """MIMIC-CXR samples with reference reports for BERTScore / CHAIR / GREEN."""
-    from .data.labeler import assign_label
 
     import os
     _REPO = os.environ.get("MEDDIAG_MIMIC_REPO", "power2004/mimic-cxr-dataset")
     _TEXT_COLS = ("impression", "findings", "report")
 
-    ds = _retry_load(_REPO, split, hf_token)
+    from .config import CONFIG
+    from .data.mimic_split import mimic_part
+    _H = CONFIG.mimic_holdout_start   # evaluation uses the HELD-OUT partition only
+    ds = mimic_part(_retry_load(_REPO, split, hf_token), "heldout", _H)
 
     count = 0
+    seen = 0   # rows consumed (resume point); count = samples yielded
     retry_delay = 30
     while True:
         try:
-            stream = ds.skip(count) if count > 0 else ds
+            stream = ds.skip(seen) if seen > 0 else ds
             for ex in stream:
+                seen += 1
                 if count >= max_samples:
                     return
                 report = ""
@@ -286,12 +239,19 @@ def mimic_eval_stream(
                         break
                 if not report:
                     continue
+                raw_img = ex.get("image") or ex.get("jpg")
+                if raw_img is None:
+                    continue
                 try:
-                    raw_img = ex.get("image") or ex.get("jpg")
-                    img = _to_pil(raw_img) if raw_img is not None else Image.new("RGB", (224, 224))
+                    img = _to_pil(raw_img)
                 except Exception:
-                    img = Image.new("RGB", (224, 224))
-                label = assign_label(report) or "NORMAL"
+                    continue            # never evaluate on a blank substitute image
+                # Paper §3.10.1: MIMIC labels derive from report text. A report the
+                # labeler can't classify is SKIPPED — it used to default to NORMAL,
+                # silently injecting label noise into Exps 2, 3, 5-9.
+                label = assign_label(report)
+                if label is None:
+                    continue
                 yield LabeledPair(image=img, report=report, label=label, source="mimic-cxr")
                 count += 1
             return
@@ -300,6 +260,6 @@ def mimic_eval_stream(
             time.sleep(retry_delay)
             retry_delay = min(retry_delay * 2, 300)
             try:
-                ds = _retry_load(_REPO, split, hf_token)
+                ds = mimic_part(_retry_load(_REPO, split, hf_token), "heldout", _H)
             except Exception:
                 pass

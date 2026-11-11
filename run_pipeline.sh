@@ -69,11 +69,12 @@ LORA_DIR="models/lora_adapter"
 LOG_DIR="logs"
 DIAG_DIR="diagnostics"
 REPORTS_DIR="reports"
+EXPERIMENTS_DIR="results/experiments"   # dedicated folder for Exp 1-9 results (one timestamped subdir per run)
 STATE_FILE="$LOG_DIR/.pipeline_state"
 LOCK_FILE="$LOG_DIR/.pipeline.lock"
 HEARTBEAT_FILE="$LOG_DIR/.pipeline_heartbeat"
 
-mkdir -p models "$LOG_DIR" "$DIAG_DIR" "$REPORTS_DIR"
+mkdir -p models "$LOG_DIR" "$DIAG_DIR" "$REPORTS_DIR" "$EXPERIMENTS_DIR"
 
 # ── Lock — prevent concurrent duplicate runs ──────────────────────────────────
 if [[ -f "$LOCK_FILE" ]]; then
@@ -188,14 +189,14 @@ else
     MAX_PAIRS_S1=10000
     MAX_PAIRS_S2=4000
     WARMUP_S1=200
-    WARMUP_S2=150
+    WARMUP_S2=100       # paper Table 2: linear warm-up 100 steps, then cosine decay
     SAVE_EVERY_S1=500   # Stage 1: ~1.38GB per checkpoint (projector 460MB + AdamW state 920MB)
     SAVE_EVERY_S2=250   # Stage 2: ~100MB per checkpoint — every 250 steps to reduce storage
     EVAL_SAMPLES=200
     ROBUSTNESS_SAMPLES=50
     KEEP_LAST_S2=8  # Stage-2 disk cap: keep only newest 8 lora_step* ckpts (>= SWA --last-n 8)
     KEEP_LAST_S1=2  # Stage-1 disk cap: newest 2 projector_step*.pt (no SWA; lossless — final projector saved separately). ~10×1.38GB would else overflow /kaggle/working
-    GRAD_ACCUM=8  # RTX 3050 4GB: keeps per-step activation memory low
+    GRAD_ACCUM=8  # batch size 1 + accumulation keeps activations inside the 6 GB VRAM budget
     MAX_PUBMED=5000
 fi
 
@@ -225,14 +226,14 @@ else
             echo "[skip] Smoke FAISS index already exists at $FAISS_INDEX_PATH"
         else
             wait_for_network
-            retry_net python -m scripts.build_faiss_index --skip-mimic --max-pubmed 20 --max-iuxray 50
+            retry_net python -m scripts.build_faiss_index --kb extended --skip-mimic --max-pubmed 20 --max-iuxray 50
             echo "[ok] FAISS index built (smoke — guidelines + small PubMed/IU-Xray)"
         fi
     elif [[ $SKIP_TRAIN -eq 1 && -f "$FAISS_INDEX_PATH" ]]; then
         echo "[skip] --skip-train set and FAISS index exists at $FAISS_INDEX_PATH"
     else
         wait_for_network
-        retry_net python -m scripts.build_faiss_index --max-mimic 20000 --max-pubmed "${MAX_PUBMED:-5000}" --max-iuxray 2000
+        retry_net python -m scripts.build_faiss_index --kb paper --max-mimic 20000   # paper §3.4: MIMIC report text only, <= ~20k snippets
         echo "[ok] FAISS index built"
     fi
     # Verify index files are non-empty — catches power-cut mid-write
@@ -355,51 +356,29 @@ else
         LORA_EXP_ARG="--lora-adapter $LORA_DIR"
     fi
 
-    LATEST_EXP_DIR=$(ls -dt "$REPORTS_DIR"/[0-9]* 2>/dev/null | head -1 || true)
-    EXP_RESUME_ARGS=""
-    EXP_IDS="all"
-
-    if [[ -n "$LATEST_EXP_DIR" ]]; then
-        # Build list of experiments that still need to run by checking each result file.
-        ALL_EXP_IDS=("1" "2" "3" "4a" "4b" "5" "6" "7" "8" "9")
-        PENDING=()
-        DONE=()
-        for eid in "${ALL_EXP_IDS[@]}"; do
-            result_file="$LATEST_EXP_DIR/exp${eid}_results.json"
-            if [[ -f "$result_file" ]]; then
-                DONE+=("$eid")
-            else
-                PENDING+=("$eid")
-            fi
-        done
-
-        if [[ ${#DONE[@]} -gt 0 ]]; then
-            DONE_STR=$(IFS=,; echo "${DONE[*]}")
-            echo "[resume] Experiments already done: $DONE_STR"
-        fi
-
-        if [[ ${#PENDING[@]} -eq 0 ]]; then
-            echo "[skip] All experiments already done — marking step5 complete"
-            _mark_done "step5"
-            # fall through to the _stage_done check on next resume
-        else
-            PENDING_STR=$(IFS=,; echo "${PENDING[*]}")
-            echo "[resume] Experiments pending: $PENDING_STR — resuming into $LATEST_EXP_DIR"
-            EXP_RESUME_ARGS="--resume-dir $LATEST_EXP_DIR"
-            EXP_IDS="$PENDING_STR"
-        fi
+    # One fixed results folder per training run: resume into the latest one, else
+    # create it now. Always passing --resume-dir means a retry (retry_net) or a new
+    # Kaggle session redoes ONLY the experiments that are missing or failed —
+    # run_experiments skips any expN_results.json already present, and exits
+    # non-zero if any experiment failed so this step is never marked done falsely.
+    EXP_RUN_DIR=$(ls -dt "$EXPERIMENTS_DIR"/[0-9]* 2>/dev/null | head -1 || true)
+    if [[ -n "$EXP_RUN_DIR" ]]; then
+        echo "[resume] Experiment results folder: $EXP_RUN_DIR (finished experiments are skipped)"
+    else
+        EXP_RUN_DIR="$EXPERIMENTS_DIR/$(date +%Y%m%d_%H%M%S)"
+        mkdir -p "$EXP_RUN_DIR"
+        echo "[new] Experiment results folder: $EXP_RUN_DIR"
     fi
 
     wait_for_network
     retry_net python -m experiments.run_experiments \
-        --exp          "$EXP_IDS" \
+        --exp          all \
         --projector    "$PROJECTOR_PATH" \
         $LORA_EXP_ARG \
         --max-samples  "$EVAL_SAMPLES" \
         --tgp-w        55 \
-        --output-dir   "$REPORTS_DIR/" \
-        $EXP_RESUME_ARGS
-    echo "[ok] Experiments done → $REPORTS_DIR/"
+        --resume-dir   "$EXP_RUN_DIR"
+    echo "[ok] All experiments done → $EXP_RUN_DIR/"
     _mark_done "step5"
 fi
 
@@ -467,5 +446,5 @@ echo "║  LoRA        : ${LORA_DIR:-none}"
 echo "║  Cls head    : models/cls_head.pt"
 echo "║  Eval report : $LOG_DIR/eval_report_*.json"
 echo "║  Plots       : $DIAG_DIR/*.png"
-echo "║  Exp reports : $REPORTS_DIR/"
+echo "║  Experiments : $EXPERIMENTS_DIR/<run>/"
 echo "╚══════════════════════════════════════════╝"

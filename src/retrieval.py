@@ -88,12 +88,15 @@ class MimicReportsSource(KnowledgeSource):
 
         repo = self.config.mimic_dataset_repo
         try:
-            ds = load_dataset(
+            from .data.mimic_split import mimic_part
+            # training partition only: a held-out test report must never be
+            # retrievable as "evidence" for its own image
+            ds = mimic_part(load_dataset(
                 repo,
                 split=self.config.mimic_split,
                 streaming=True,
                 token=self.config.hf_token or None,
-            )
+            ), "train", self.config.mimic_holdout_start)
         except Exception as e:
             # Wrap with an actionable message. The original traceback still chains
             # so debugging info isn't lost — we just add guidance above it.

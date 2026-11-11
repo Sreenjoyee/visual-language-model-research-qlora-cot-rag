@@ -199,10 +199,10 @@ def main() -> int:
 
     # Load the old head for A/B (pool inferred from its state_dict).
     old_state = torch.load(args.old_head, map_location="cpu")
-    old_pool = "attn" if any("vis_attn" in k for k in old_state) else "mean"
-    old_head = ClassificationHead(llm_dim=config.llm_hidden_dim, rag_dim=config.embedder_dim,
-                                  hidden_dim=config.cls_hidden_dim, pool=old_pool).to(device)
-    old_head.load_state_dict(old_state); old_head.eval()
+    old_head = ClassificationHead.from_state_dict(
+        old_state, llm_dim=config.llm_hidden_dim, rag_dim=config.embedder_dim,
+        hidden_dim=config.cls_hidden_dim).to(device)
+    old_head.eval()
 
     print("\n================  A/B (val)  ================")
     print(f"{'metric':<26}{'OLD':>10}{'NEW':>10}")

@@ -46,16 +46,17 @@ def stream_mimic_pairs(
     rather than silently yielding nothing.
     """
     from datasets import load_dataset
+    from .mimic_split import mimic_part
 
     repo = config.mimic_dataset_repo
     split = split or config.mimic_split
     try:
-        ds = load_dataset(
+        ds = mimic_part(load_dataset(
             repo,
             split=split,
             streaming=True,
             token=config.hf_token or None,
-        )
+        ), "train", config.mimic_holdout_start)
     except Exception as e:
         raise RuntimeError(
             f"Could not load MIMIC dataset '{repo}' (split='{split}'). "
@@ -121,6 +122,7 @@ def stream_mimic_pairs(
             retry_delay = min(retry_delay * 2, 300)  # cap at 5 min
             # Reload the dataset handle for a fresh connection
             try:
-                ds = load_dataset(repo, split=split, streaming=True, token=config.hf_token or None)
+                ds = mimic_part(load_dataset(repo, split=split, streaming=True, token=config.hf_token or None),
+                                "train", config.mimic_holdout_start)
             except Exception:
                 pass  # will retry on next loop iteration

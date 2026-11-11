@@ -35,9 +35,10 @@ class Config:
 
     # --- Hardware ---
     device: str = field(default_factory=lambda: os.environ.get("MEDDIAG_DEVICE", "cuda:0"))
-    # Note: "4GB inference" in the SRS is aspirational. We measure actual usage
-    # rather than hard-crash below a threshold. This value is passed to
-    # transformers `max_memory` to prevent silent CPU offload.
+    # Project VRAM budget: ≤ 6 GB (consumer-GPU deployment target). This value is
+    # passed to transformers `max_memory` (LLM weight placement; prevents silent
+    # CPU offload). Set MEDDIAG_VRAM_CAP_GB too to make 6 GB a HARD per-process
+    # ceiling on bigger GPUs (see _apply_vram_cap below).
     max_vram_gb: float = field(
         default_factory=lambda: float(os.environ.get("MEDDIAG_MAX_VRAM_GB", "6.0"))
     )
@@ -98,6 +99,12 @@ class Config:
     mimic_split: str = field(
         default_factory=lambda: os.environ.get("MEDDIAG_MIMIC_SPLIT", "train")
     )
+    # Train / held-out partition of that single split (see src/data/mimic_split.py):
+    # rows before this index train the model + knowledge base; rows from it on are
+    # evaluation-only (paper §4.1 "held-out" in-distribution split).
+    mimic_holdout_start: int = field(
+        default_factory=lambda: int(os.environ.get("MEDDIAG_MIMIC_HOLDOUT_START", "27000"))
+    )
     # Candidate column names, checked in order. First match wins. If none match,
     # loaders raise with the actual available keys — no silent skip.
     mimic_text_columns: tuple[str, ...] = ("impression", "findings", "report")
@@ -132,6 +139,27 @@ class Config:
     )
     cls_focal_gamma: float = field(
         default_factory=lambda: float(os.environ.get("MEDDIAG_CLS_FOCAL_GAMMA", "0.0"))
+    )
+    # Paper §3.9 / Table 2: class-weighted CE, NORMAL = 2.0, ABNORMAL = 1.0
+    # (cls_pos_weight above is the ABNORMAL weight), no label smoothing.
+    cls_normal_weight: float = field(
+        default_factory=lambda: float(os.environ.get("MEDDIAG_CLS_NORMAL_WEIGHT", "2.0"))
+    )
+    cls_label_smoothing: float = field(
+        default_factory=lambda: float(os.environ.get("MEDDIAG_CLS_LABEL_SMOOTHING", "0.0"))
+    )
+    # Extra Stage-2 training sources beyond MIMIC-CXR. Empty = MIMIC only (paper).
+    # Comma list of {"iu", "kermany"} — NOT the paper's method (IU-Xray is an OOD
+    # evaluation set in the paper, RQ4 / Exp 4A).
+    stage2_extra_sources: frozenset = field(
+        default_factory=lambda: frozenset(
+            s.strip().lower() for s in os.environ.get("MEDDIAG_S2_EXTRA_SOURCES", "").split(",") if s.strip()
+        )
+    )
+    # Head layout: "paper" (§3.8: concat 3072+384 → 512 → GELU → 2) or the legacy
+    # "projected" layout. Loading always auto-detects from the checkpoint.
+    cls_arch: str = field(
+        default_factory=lambda: os.environ.get("MEDDIAG_CLS_ARCH", "paper")
     )
     # Dimension of the hidden layer in the classification MLP.
     cls_hidden_dim: int = 512

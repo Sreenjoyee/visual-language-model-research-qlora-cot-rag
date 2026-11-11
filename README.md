@@ -6,7 +6,7 @@ Clean-room rebuild of a chest X-ray multimodal radiology pipeline, per the SRS.
 
 A runnable **inference** path:
 
-Image → frozen ViT-B/16 → Perceiver Resampler → FAISS (MIMIC reports) → LLaMA-3.2-3B (4-bit NF4) → structured diagnosis + reasoning
+Image → frozen DenseNet-121 (TorchXRayVision) → Perceiver Resampler → FAISS (MIMIC reports) → LLaMA-3.2-3B (4-bit NF4) → structured diagnosis + reasoning
 
 ## What this is not (yet)
 
@@ -18,7 +18,7 @@ Image → frozen ViT-B/16 → Perceiver Resampler → FAISS (MIMIC reports) → 
 
 - Windows + Git Bash (or any POSIX shell)
 - Python 3.12
-- NVIDIA GPU with ≥ 6 GB VRAM recommended. The code now uses a ViT-B/16 vision encoder and the LLM loader will fail loudly if GPU memory is insufficient.
+- NVIDIA GPU with a **6 GB VRAM budget** (project target). The vision encoder is a frozen TorchXRayVision DenseNet-121; the LLM loader fails loudly instead of silently offloading to CPU. On larger GPUs set `MEDDIAG_VRAM_CAP_GB=6` to enforce the budget as a hard limit.
 - Note: if your GPU compute capability is not supported by the installed PyTorch CUDA build, the code falls back to CPU loading. This is slower but avoids the unsupported-device crash seen on RTX 5060 with the current PyTorch wheel.
 - HuggingFace token with access to:
   - `meta-llama/Llama-3.2-3B-Instruct`
@@ -92,7 +92,7 @@ meddiag/
 │   ├── config.py          # .env loading; all paths and model ids
 │   ├── prompts.py         # SINGLE source of truth for prompt text
 │   ├── output_parser.py   # structured-output parser (no torch dep)
-│   ├── vision.py          # frozen ViT-B/16, spatial tokens
+│   ├── vision.py          # frozen DenseNet-121 (xrv), 7×7 spatial tokens
 │   ├── projector.py       # Perceiver Resampler → LLaMA embedding space
 │   ├── llm.py             # 4-bit NF4 loader; fails on silent CPU offload
 │   ├── retrieval.py       # FAISS IndexFlatL2 + MiniLM; MIMIC source

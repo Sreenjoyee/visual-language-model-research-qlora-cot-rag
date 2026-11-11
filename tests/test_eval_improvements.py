@@ -164,7 +164,7 @@ def test_compile_report_emits_threshold_and_ci():
         SimpleNamespace(
             true_label=lbl, pred_label=("ABNORMAL" if s >= 0.5 else "NORMAL"),
             p_abnormal=s, p_cls=s, p_lm=s, correct=True, evidence_used=[1],
-            reasoning="x", latency_s=1.0, vram_peak_gb=0.3, source="mimic",
+            reasoning="x", latency_s=1.0, vram_peak_gb=0.3, ram_gb=1.0, source="mimic",
         )
         for lbl, s in rows
     ]

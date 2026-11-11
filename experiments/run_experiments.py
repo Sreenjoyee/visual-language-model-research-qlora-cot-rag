@@ -520,27 +520,71 @@ def exp6_calibration(
     output_dir: Path,
     max_samples: int = 100,
 ) -> dict:
-    print("\n[Exp 6] ECE Calibration + Reliability Diagram")
-    results = run_eval_stream(
-        pipeline,
-        mimic_eval_stream(hf_token=pipeline.config.hf_token, max_samples=max_samples),
-        max_samples=max_samples,
-    )
-    if not results:
+    """Raw ECE + post-hoc temperature scaling (paper §4.7 / Table 9).
+
+    Streams 2×max_samples MIMIC-CXR cases: the first half is the held-out
+    CALIBRATION split (fits the scalar temperature T* by minimising NLL), the
+    second half is the EVALUATION split on which raw and temperature-scaled ECE
+    are both reported. The two splits never overlap. Scaling is monotonic, so
+    AUROC is unchanged.
+    """
+    print("\n[Exp 6] ECE Calibration + Reliability Diagram (+ temperature scaling)")
+    stream = mimic_eval_stream(hf_token=pipeline.config.hf_token, max_samples=2 * max_samples)
+    results = run_eval_stream(pipeline, stream, max_samples=2 * max_samples)
+    if len(results) < 4:
         return {"error": "no results"}
 
-    y_true, _, y_prob = _scores_to_binary(results)
-    ece = expected_calibration_error(y_true, y_prob)
+    half = len(results) // 2
+    calib, evals = results[:half], results[half:]
+    yc, _, pc = _scores_to_binary(calib)
+    y_true, _, y_prob = _scores_to_binary(evals)
+
+    t_star = fit_temperature(yc, pc)
+    y_prob_scaled = apply_temperature(y_prob, t_star)
+    ece_raw = expected_calibration_error(y_true, y_prob)
+    ece_scaled = expected_calibration_error(y_true, y_prob_scaled)
 
     save_figure(plot_calibration_curve(y_true, y_prob), output_dir / "exp6_calibration_curve")
+    save_figure(plot_calibration_curve(y_true, y_prob_scaled),
+                output_dir / "exp6_calibration_curve_temperature_scaled")
 
     result = {
         "experiment": 6, "dataset": "MIMIC-CXR",
-        "n_samples": len(results), "ece": ece,
+        "n_samples": len(evals), "n_calibration": len(calib), "n_bins": 10,
+        "ece": ece_raw,                       # raw (pre-scaling) — kept under the original key
+        "ece_temperature_scaled": ece_scaled,
+        "temperature": round(t_star, 4),
     }
     _save_json(result, output_dir / "exp6_results.json")
-    print(f"  ECE = {ece:.4f}")
+    print(f"  ECE raw = {ece_raw:.4f}  |  temperature-scaled (T*={t_star:.3f}) = {ece_scaled:.4f}")
     return result
+
+
+def _logit(p: float, eps: float = 1e-6) -> float:
+    import math
+    p = min(max(p, eps), 1.0 - eps)
+    return math.log(p / (1.0 - p))
+
+
+def apply_temperature(probs: list[float], t: float) -> list[float]:
+    """p' = sigmoid(logit(p) / T) — the binary form of softmax(logits / T)."""
+    import math
+    return [1.0 / (1.0 + math.exp(-_logit(p) / t)) for p in probs]
+
+
+def fit_temperature(y_true: list[int], probs: list[float]) -> float:
+    """Scalar T* minimising binary NLL on a calibration split (log-spaced grid
+    over [0.05, 20] then a local refinement). T > 1 softens overconfidence."""
+    import math
+
+    def nll(t: float) -> float:
+        ps = apply_temperature(probs, t)
+        return -sum(math.log(max(p if y == 1 else 1.0 - p, 1e-12)) for y, p in zip(y_true, ps)) / len(ps)
+
+    grid = [0.05 * (400 ** (i / 199)) for i in range(200)]          # 0.05 … 20
+    best = min(grid, key=nll)
+    fine = [best * (0.9 + 0.2 * i / 100) for i in range(101)]
+    return min(fine, key=nll)
 
 
 # ── Experiment 7: RAG k-Value Ablation ───────────────────────────────────────
@@ -677,7 +721,7 @@ def exp9_component_ablation(
 
     configs = {
         "full_system":   "Full system (RAG + LoRA + CLS head + CoT)",
-        "no_rag":        "No RAG (empty evidence)",
+        "no_rag":        "No RAG (empty evidence, LM-only signal)",
         "no_cls_head":   "No ClassificationHead (text-parse only)",
         "no_lora":       "No LoRA (base LLM, projector only)",
         "no_cot":        "No CoT (direct answer, no reasoning)",
@@ -709,31 +753,13 @@ def exp9_component_ablation(
     print(f"      AUROC = {ablation_results['full_system']['auroc']:.4f}")
 
     # ── B: No RAG ────────────────────────────────────────────────────────────
+    # Same scored path as (A) with empty evidence. (Previously this called
+    # pipeline.diagnose(PIL image) — diagnose() expects a file path — and built an
+    # incomplete ScoredResult, so every sample was silently skipped: n=0, AUROC=nan.)
+    # Without retrieved embeddings the ClassificationHead cannot run, so this
+    # configuration measures the LM-only signal with no evidence.
     print("  [B] No RAG (empty evidence)...")
-    orig_top_k = pipeline.config.retrieval_top_k
-    pipeline.config.retrieval_top_k = 0  # forces empty retrieval
-
-    @torch.no_grad()
-    def _diagnose_no_rag(pair) -> ScoredResult:
-        import time as _time
-        t0 = _time.time()
-        result = pipeline.diagnose(pair.image)
-        return ScoredResult(
-            true_label=pair.label,
-            pred_label=result.diagnosis,
-            p_abnormal=result.cls_confidence if result.cls_confidence is not None else 0.5,
-            reasoning=result.reasoning,
-            latency_s=_time.time() - t0,
-        )
-
-    no_rag_results = []
-    for pair in tqdm(samples, desc="  [B] No RAG", unit="sample"):
-        try:
-            no_rag_results.append(_diagnose_no_rag(pair))
-        except Exception as e:
-            tqdm.write(f"  skip: {e}")
-
-    pipeline.config.retrieval_top_k = orig_top_k
+    no_rag_results = run_eval_stream(pipeline, iter(samples), max_samples=max_samples, no_rag=True)
     ablation_results["no_rag"] = {
         "auroc": _auroc_from_results(no_rag_results),
         "n": len(no_rag_results),
@@ -818,8 +844,11 @@ def exp9_component_ablation(
                 "ABNORMAL" if p_abn >= pipeline.config.classification_threshold else "NORMAL"
             ),
             p_abnormal=p_abn,
+            evidence_used=parsed["evidence_used"],
             reasoning=raw,
             latency_s=_time.time() - t0,
+            vram_peak_gb=0.0,
+            source=pair.source,
         )
 
     no_cot_results = []
@@ -882,7 +911,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="MEDDIAG Experiment Runner")
     parser.add_argument("--exp", default="all",
                         help="Comma-separated experiment IDs or 'all'. E.g. 1,2,4a")
-    parser.add_argument("--output-dir", default="reports", type=Path)
+    parser.add_argument("--output-dir", default="results/experiments", type=Path,
+                        help="Dedicated experiment-results folder; each run gets a timestamped subdir")
     parser.add_argument("--resume-dir", default=None, type=Path,
                         help="Reuse an existing output dir instead of creating a new timestamped one")
     parser.add_argument("--max-samples", type=int, default=50)
@@ -934,24 +964,51 @@ def main() -> None:
         "9":  lambda: exp9_component_ablation(pipeline, output_dir, _n("9")),
     }
 
+    # Results already in output_dir (from an earlier, interrupted run) are kept and
+    # not recomputed — so a retry/resume only redoes what is missing or failed.
+    for prev in sorted(output_dir.glob("exp*_results.json")):
+        try:
+            all_results[prev.name[: -len("_results.json")]] = json.loads(prev.read_text(encoding="utf-8"))
+        except Exception:
+            pass   # unreadable -> treated as not done, recomputed below
+
+    failed: list[str] = []
     for exp_id in exps:
         fn = _dispatch.get(exp_id)
         if fn is None:
             print(f"  Unknown experiment: {exp_id}")
+            failed.append(exp_id)
             continue
-        try:
-            r = fn()
-            all_results[f"exp{exp_id}"] = r
-            # Cache Exp 2 BERTScore means so Exp 3 can reuse them
-            if exp_id == "2" and "rag" in r:
-                rag_bs_mean    = r["rag"]["bertscore_f1"]["mean"]
-                no_rag_bs_mean = r["no_rag"]["bertscore_f1"]["mean"]
-        except Exception as e:
-            print(f"  [Exp {exp_id}] FAILED: {type(e).__name__}: {e}")
-            all_results[f"exp{exp_id}"] = {"error": str(e)}
+        key = f"exp{exp_id}"
+        prev = all_results.get(key)
+        if prev is not None and "error" not in prev and (output_dir / f"{key}_results.json").exists():
+            print(f"\n[Exp {exp_id}] already done in {output_dir} — skipped")
+            r = prev
+            # Exp 1 tunes the decision threshold used by every later experiment;
+            # re-apply it (the repo, and so config.py, is fresh on each Kaggle run).
+            if exp_id == "1" and isinstance(r.get("threshold"), dict) and "optimal" in r["threshold"]:
+                pipeline.config.classification_threshold = r["threshold"]["optimal"]
+                print(f"  [threshold] re-applied optimal threshold {r['threshold']['optimal']} from Exp 1")
+        else:
+            try:
+                r = fn()
+            except Exception as e:
+                print(f"  [Exp {exp_id}] FAILED: {type(e).__name__}: {e}")
+                r = {"error": f"{type(e).__name__}: {e}"}
+            all_results[key] = r
+            if "error" in r:   # covers both exceptions and "no results" (empty stream / all samples errored)
+                failed.append(exp_id)
+        # Cache Exp 2 BERTScore means so Exp 3 can reuse them
+        if exp_id == "2" and "rag" in r:
+            rag_bs_mean    = r["rag"]["bertscore_f1"]["mean"]
+            no_rag_bs_mean = r["no_rag"]["bertscore_f1"]["mean"]
 
     _save_json(all_results, output_dir / "all_results.json")
-    print(f"\nAll done. Results in {output_dir}/")
+    if failed:
+        print(f"\n[experiments] FAILED: {', '.join('Exp ' + e for e in failed)} — see errors above. "
+              f"Re-run with --resume-dir {output_dir} to redo only these.")
+        raise SystemExit(1)
+    print(f"\nAll {len(exps)} experiments OK. Results in {output_dir}/")
 
 
 if __name__ == "__main__":

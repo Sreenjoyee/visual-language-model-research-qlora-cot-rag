@@ -18,19 +18,17 @@ from PIL import Image
 from .balanced_stream import LabeledPair
 from .labeler import assign_label
 
-_REPOS: list[str] = [
-    "ChayanM/IUXray-Data-Train-Test",
-    "projectnateryan/iu_xray",
-    "Soobin-Kim/iu_xray",
+# HuggingFace IU-Xray (Indiana / Open-I) mirrors WITH IMAGES, in preference order.
+# (repo, split, image column, text columns, native-normal column or None)
+# NOTE: the previous mirror, ChayanM/IUXray-Data-Train-Test, has NO image column
+# (only Image_Name + Caption) — the old code silently used a blank 224x224 image,
+# so IU training samples and the Exp 4A probe were run on empty images.
+_SOURCES: list[tuple[str, str, str, tuple[str, ...], str | None]] = [
+    # official Open-I release: frontal view + findings/impression + native labels
+    ("ykumards/open-i", "train", "img_frontal", ("findings", "impression"), "Problems"),
+    ("MLforHealthcare/Indiana_University_Chest_X-ray_Collection", "train", "image", ("report",), None),
+    ("simwit/iu-xray", "test", "image", ("findings", "impression"), None),
 ]
-_TEXT_COLS: list[str] = ["Caption", "findings", "impression", "report", "text"]
-_IMG_COLS: list[str] = ["image", "jpg", "img", "png"]
-
-_PATHOLOGY = frozenset({
-    "pneumonia", "effusion", "cardiomegaly", "pneumothorax",
-    "atelectasis", "consolidation", "opacity", "infiltrate",
-    "mass", "nodule", "edema", "fracture",
-})
 
 _NET_ERRORS = (ConnectionError, OSError, TimeoutError, BrokenPipeError)
 
@@ -38,6 +36,8 @@ _NET_ERRORS = (ConnectionError, OSError, TimeoutError, BrokenPipeError)
 def _to_pil(raw) -> Image.Image:
     if isinstance(raw, Image.Image):
         return raw.convert("RGB")
+    if isinstance(raw, dict) and raw.get("bytes"):
+        raw = raw["bytes"]
     if isinstance(raw, (bytes, bytearray)):
         return Image.open(io.BytesIO(raw)).convert("RGB")
     return Image.open(raw).convert("RGB")
@@ -89,12 +89,8 @@ def _iu_local_stream(want_label: str, max_samples: int) -> Iterator[LabeledPair]
             rl = report.lower()
             if len(rl) < 10:
                 continue
-            if want_label == "NORMAL":
-                if "normal" not in rl or any(p in rl for p in _PATHOLOGY):
-                    continue
-            else:
-                if not any(p in rl for p in _PATHOLOGY):
-                    continue
+            if assign_label(report) != want_label:   # same negation-aware labeler as MIMIC
+                continue
             imgp = os.path.join(img_dir, str(fname))
             if not os.path.exists(imgp):
                 continue
@@ -107,165 +103,77 @@ def _iu_local_stream(want_label: str, max_samples: int) -> Iterator[LabeledPair]
             count += 1
 
 
-def iu_xray_abnormal_training_stream(
-    max_samples: int = 500,
-) -> Iterator[LabeledPair]:
-    """Yield confirmed-ABNORMAL LabeledPairs from IU-Xray for Stage 2 training.
+def iu_hf_labeled_stream(want_label: str, max_samples: int, tag: str,
+                         source: str | None = None) -> Iterator[LabeledPair]:
+    """IU-Xray from HuggingFace with REAL images, labelled by the project's
+    negation-aware report labeler (src/data/labeler.assign_label — same as MIMIC).
 
-    Filters conservatively — report must contain at least one pathology keyword.
-    Supplements MIMIC ABNORMAL cases with examples from a different institution.
-    Prefers a locally-attached Kaggle IU-Xray dataset (avoids HF's Xet CDN).
+    Where the mirror carries the native Open-I label (Problems == "normal"), it
+    must AGREE with the report label ("confirmed" normal/abnormal, paper §3.10.1).
+    Rows without a decodable image are skipped — never a blank substitute.
     """
+    from datasets import load_dataset
+
+    for repo, split, img_col, text_cols, native_col in _SOURCES:
+        try:
+            ds = load_dataset(repo, split=split, streaming=True)
+        except Exception as e:
+            print(f"[{tag}] could not load '{repo}': {type(e).__name__}: {e}")
+            continue
+        print(f"[{tag}] loaded '{repo}' ({split})")
+        count, seen, retry_delay = 0, 0, 30
+        while True:
+            try:
+                stream = ds.skip(seen) if seen > 0 else ds
+                for ex in stream:
+                    seen += 1
+                    if count >= max_samples:
+                        return
+                    report = " ".join(str(ex.get(c) or "").strip() for c in text_cols).strip()
+                    if len(report) < 20 or assign_label(report) != want_label:
+                        continue
+                    if native_col is not None:
+                        native_normal = str(ex.get(native_col) or "").strip().lower() == "normal"
+                        if native_normal != (want_label == "NORMAL"):
+                            continue
+                    raw = ex.get(img_col)
+                    if raw is None:
+                        continue
+                    try:
+                        img = _to_pil(raw)
+                    except Exception:
+                        continue
+                    yield LabeledPair(image=img, report=report, label=want_label,
+                                      source=source or f"iu-xray-{want_label.lower()}")
+                    count += 1
+                if count > 0:
+                    return
+                print(f"[{tag}] '{repo}' gave no usable {want_label} rows — trying next mirror")
+                break
+            except _NET_ERRORS as e:
+                print(f"[{tag}] network error at row {seen}: {e}. Retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 300)
+                try:
+                    ds = load_dataset(repo, split=split, streaming=True)
+                except Exception:
+                    pass
+    print(f"[{tag}] no IU-Xray mirror with images is available")
+
+
+def iu_xray_abnormal_training_stream(max_samples: int = 500) -> Iterator[LabeledPair]:
+    """ABNORMAL IU-Xray cases for Stage-2 training (report-labelled, negation-aware).
+    Uses a locally-attached Kaggle copy only if one is present (fallback)."""
     if _iu_local_dir():
         yield from _iu_local_stream("ABNORMAL", max_samples)
         return
-
-    from datasets import load_dataset
-
-    ds = None
-    loaded_repo = None
-    for repo in _REPOS:
-        try:
-            ds = load_dataset(repo, split="train", streaming=True)
-            loaded_repo = repo
-            break
-        except Exception as e:
-            print(f"[iu_xray_abnormal_training_stream] Could not load '{repo}': {e}")
-
-    if ds is None:
-        print("[iu_xray_abnormal_training_stream] No IU-Xray source available — skipping")
-        return
-
-    text_col: str | None = None
-    count = 0
-    retry_delay = 30
-
-    while True:
-        try:
-            stream = ds.skip(count) if count > 0 else ds
-            for ex in stream:
-                if count >= max_samples:
-                    return
-
-                if text_col is None:
-                    text_col = next((c for c in _TEXT_COLS if c in ex), None)
-                    if text_col is None:
-                        return
-
-                raw_text = ex.get(text_col, "")
-                if not raw_text or not isinstance(raw_text, str):
-                    continue
-                report = raw_text.strip().lower()
-
-                if len(report) < 40:
-                    continue
-                if not any(p in report for p in _PATHOLOGY):
-                    continue
-
-                try:
-                    raw_img = next((ex.get(c) for c in _IMG_COLS if ex.get(c) is not None), None)
-                    img = _to_pil(raw_img) if raw_img is not None else Image.new("RGB", (224, 224))
-                except Exception:
-                    img = Image.new("RGB", (224, 224))
-
-                yield LabeledPair(
-                    image=img,
-                    report=raw_text.strip(),
-                    label="ABNORMAL",
-                    source="iu-xray-abnormal-train",
-                )
-                count += 1
-            return
-        except _NET_ERRORS as e:
-            print(f"[iu_xray_abnormal_training_stream] Network error at {count}: {e}. Retrying in {retry_delay}s...")
-            time.sleep(retry_delay)
-            retry_delay = min(retry_delay * 2, 300)
-            try:
-                from datasets import load_dataset as _ld
-                ds = _ld(loaded_repo, split="train", streaming=True)
-            except Exception:
-                pass
+    yield from iu_hf_labeled_stream("ABNORMAL", max_samples, "iu_xray_abnormal_training_stream", "iu-xray-abnormal-train")
 
 
-def iu_xray_normal_training_stream(
-    max_samples: int = 2000,
-) -> Iterator[LabeledPair]:
-    """Yield confirmed-NORMAL LabeledPairs from IU-Xray for Stage 2 training.
-
-    Filters conservatively — report must say 'normal' with no pathology keywords.
-    Prefers a locally-attached Kaggle IU-Xray dataset (avoids HF's Xet CDN); else
-    falls back across multiple HuggingFace mirror repos.
-    """
+def iu_xray_normal_training_stream(max_samples: int = 2000) -> Iterator[LabeledPair]:
+    """NORMAL IU-Xray cases for Stage-2 training (report-labelled, negation-aware).
+    Uses a locally-attached Kaggle copy only if one is present (fallback)."""
     if _iu_local_dir():
         yield from _iu_local_stream("NORMAL", max_samples)
         return
-
-    from datasets import load_dataset
-
-    ds = None
-    loaded_repo = None
-    for repo in _REPOS:
-        try:
-            ds = load_dataset(repo, split="train", streaming=True)
-            loaded_repo = repo
-            print(f"[iu_xray_normal_training_stream] Loaded from '{repo}'")
-            break
-        except Exception as e:
-            print(f"[iu_xray_normal_training_stream] Could not load '{repo}': {e}")
-
-    if ds is None:
-        print("[iu_xray_normal_training_stream] No IU-Xray source available — skipping")
-        return
-
-    text_col: str | None = None
-    count = 0
-    retry_delay = 30
-
-    while True:
-        try:
-            stream = ds.skip(count) if count > 0 else ds
-            for ex in stream:
-                if count >= max_samples:
-                    return
-
-                if text_col is None:
-                    text_col = next((c for c in _TEXT_COLS if c in ex), None)
-                    if text_col is None:
-                        return
-
-                raw_text = ex.get(text_col, "")
-                if not raw_text or not isinstance(raw_text, str):
-                    continue
-                report = raw_text.strip().lower()
-
-                if len(report) < 40:
-                    continue
-                if "normal" not in report:
-                    continue
-                if any(p in report for p in _PATHOLOGY):
-                    continue
-
-                # Try to load image; synthesise blank if unavailable
-                try:
-                    raw_img = next((ex.get(c) for c in _IMG_COLS if ex.get(c) is not None), None)
-                    img = _to_pil(raw_img) if raw_img is not None else Image.new("RGB", (224, 224))
-                except Exception:
-                    img = Image.new("RGB", (224, 224))
-
-                yield LabeledPair(
-                    image=img,
-                    report=raw_text.strip(),
-                    label="NORMAL",
-                    source="iu-xray-normal-train",
-                )
-                count += 1
-            return
-        except _NET_ERRORS as e:
-            print(f"[iu_xray_normal_training_stream] Network error at {count}: {e}. Retrying in {retry_delay}s...")
-            time.sleep(retry_delay)
-            retry_delay = min(retry_delay * 2, 300)
-            try:
-                from datasets import load_dataset as _ld
-                ds = _ld(loaded_repo, split="train", streaming=True)
-            except Exception:
-                pass
+    yield from iu_hf_labeled_stream("NORMAL", max_samples, "iu_xray_normal_training_stream", "iu-xray-normal-train")

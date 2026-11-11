@@ -66,6 +66,14 @@ def main() -> int:
         help="Skip MIMIC source (useful when HF_TOKEN is not available).",
     )
     parser.add_argument(
+        "--kb",
+        choices=("paper", "extended"),
+        default="paper",
+        help="paper (default): MIMIC-CXR report text only, as specified in the MEDDIAG "
+             "paper §3.4 / Table 1. extended: also PubMed/OpenAlex/CrossRef/EuropePMC/"
+             "PubMedQA/IU-Xray/guideline snippets (NOT part of the paper's method).",
+    )
+    parser.add_argument(
         "--skip-ncbi",
         action="store_true",
         help="Skip all NCBI-dependent sources (RadiopaediaSource, PMC full-text). "
@@ -86,6 +94,13 @@ def main() -> int:
     else:
         print("[build_faiss] Source 1: MIMIC-CXR SKIPPED")
 
+    if args.kb == "paper":
+        if not sources:
+            parser.error("--kb paper needs MIMIC-CXR (don't combine with --skip-mimic / --max-mimic 0)")
+        print("[build_faiss] --kb paper: MIMIC-CXR report text only (paper §3.4, Table 1)")
+        return _build(sources, args)
+
+    # ---- extended knowledge base (not the paper's method) ----------------------
     # Source 2: Semantic Scholar (falls back gracefully if rate-limited)
     sources.append(RadiopaediaSource(max_snippets=args.max_pubmed))
     print(f"[build_faiss] Source 2: Semantic Scholar abstracts (max {args.max_pubmed} snippets)")
@@ -118,6 +133,10 @@ def main() -> int:
     sources.append(GuidelinesSource())
     print("[build_faiss] Source 7: ACR/RSNA/WHO guidelines (22 static snippets)")
 
+    return _build(sources, args)
+
+
+def _build(sources, args) -> int:
     retriever = Retriever(CONFIG)
     out_dir = args.out_dir or CONFIG.faiss_index_dir
     print(f"[build_faiss] Building index from {len(sources)} source(s) -> {out_dir}")

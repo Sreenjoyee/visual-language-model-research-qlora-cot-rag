@@ -5,6 +5,7 @@ myenv/
 # Secrets
 .env
 *.key
+secrets.md
 
 # Python
 __pycache__/

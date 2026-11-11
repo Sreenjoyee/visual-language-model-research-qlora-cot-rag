@@ -73,6 +73,8 @@ _ABNORMAL_TERMS: tuple[str, ...] = (
     "nodular",
     "cardiomegaly",
     "enlarged cardiac",
+    "enlarged",             # "the heart is mildly enlarged" (IU-Xray probe case labelled NORMAL)
+    "enlargement",          # cardiac / hilar / mediastinal enlargement
     "pulmonary edema",
     "edema",
     "congestion",
@@ -89,6 +91,10 @@ _ABNORMAL_TERMS: tuple[str, ...] = (
     "mediastinal mass",
     "tracheal deviation",
     "subcutaneous emphysema",
+    "emphysema",            # e.g. IU-Xray "findings suggestive of emphysema" (was labelled NORMAL)
+    "hyperinflat",          # hyperinflation / hyperinflated lungs (COPD sign)
+    "hyperexpan",           # hyperexpanded lungs
+    "copd",
     "airspace disease",
     "ground glass",
     "reticular",
@@ -101,11 +107,27 @@ _ABNORMAL_TERMS: tuple[str, ...] = (
 )
 
 # Negation prefixes that flip an abnormal term to normal context
-_NEGATION_RE = re.compile(
-    r"\b(no|without|absence of|absent|negative for|ruled out|clear of|free of)\b"
-    r"[\s\w,]{0,15}$",  # up to 15 chars before the term
+# NegEx-style negation (Chapman et al.): a negation cue negates a pathology term
+# that follows it within the SAME sentence and within _NEG_SCOPE_WORDS words,
+# unless a termination word ("but", "however", ...) intervenes. Counting words
+# (not characters) handles lists like "no visualized pneumothorax or large
+# pleural effusion", which a 15-character window missed — so clean reports were
+# skipped as "contradictory".
+_NEGATION_CUE_RE = re.compile(
+    r"\b(no|not|without|absence of|absent|negative for|ruled out|clear of|free of)\b",
     re.IGNORECASE,
 )
+# Pseudo-negations: "no change in the effusion" means the effusion PERSISTS.
+_PSEUDO_NEGATION_RE = re.compile(
+    r"\bno\s+(significant\s+|interval\s+|appreciable\s+)?"
+    r"(change|increase|decrease|improvement|worsening)\b",
+    re.IGNORECASE,
+)
+_NEG_TERMINATORS = re.compile(
+    r"\b(but|however|although|though|except|there is|there are|which|concerning for|new)\b",
+    re.IGNORECASE,
+)
+_NEG_SCOPE_WORDS = 6
 
 
 def _has_term(text_lower: str, term: str) -> bool:
@@ -113,13 +135,31 @@ def _has_term(text_lower: str, term: str) -> bool:
 
 
 def _is_negated(text_lower: str, term: str) -> bool:
-    """Check if a term occurrence is likely preceded by a negation."""
-    idx = text_lower.find(term)
-    if idx < 0:
+    """True if EVERY occurrence of `term` is negated (one affirmed mention = present)."""
+    start, found = 0, False
+    while True:
+        idx = text_lower.find(term, start)
+        if idx < 0:
+            return found
+        found = True
+        if not _occurrence_negated(text_lower, idx):
+            return False
+        start = idx + len(term)
+
+
+def _occurrence_negated(text_lower: str, idx: int) -> bool:
+    sent_start = max(text_lower.rfind(".", 0, idx), text_lower.rfind(";", 0, idx)) + 1
+    prefix = text_lower[sent_start:idx]
+    cues = list(_NEGATION_CUE_RE.finditer(prefix))
+    if not cues:
         return False
-    # Look at the 60 chars before the term for a negation word
-    prefix = text_lower[max(0, idx - 60):idx]
-    return bool(_NEGATION_RE.search(prefix))
+    cue = cues[-1]
+    scope = prefix[cue.end():]
+    if _PSEUDO_NEGATION_RE.match(prefix, cue.start()):
+        return False
+    if _NEG_TERMINATORS.search(scope):
+        return False
+    return len(scope.split()) <= _NEG_SCOPE_WORDS
 
 
 def assign_label(text: str) -> str | None:

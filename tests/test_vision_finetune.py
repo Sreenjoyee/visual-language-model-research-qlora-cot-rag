@@ -68,7 +68,10 @@ def vision_encoder():
 
 def test_vision_finetune_lifecycle(vision_encoder):
     import torch
-    px = torch.randn(1, 3, 224, 224)
+    # DenseNet-121 (xrv) takes 1-channel grayscale; derive the shape from preprocess()
+    # so the test follows whichever encoder is configured.
+    from PIL import Image
+    px = torch.randn(*vision_encoder.preprocess(Image.new("L", (224, 224))).shape)
 
     # frozen by default: forward output carries no grad graph
     assert vision_encoder._finetune is False

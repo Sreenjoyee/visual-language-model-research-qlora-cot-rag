@@ -76,17 +76,17 @@ def _collect_logits(
             print("[calibrate] WARNING: peft not available, using base LLM weights.")
     llm.model.eval()
 
-    cls_head = ClassificationHead(
-        llm_dim=llm.hidden_dim,
-        rag_dim=config.embedder_dim,
-        hidden_dim=config.cls_hidden_dim,
-    )
     if not config.cls_head_path.exists():
         raise FileNotFoundError(
             f"cls_head.pt not found at {config.cls_head_path}. "
             "Run Stage 2 training first."
         )
-    cls_head.load_state_dict(torch.load(config.cls_head_path, map_location="cpu"))
+    # Layout/pooling inferred from the checkpoint (previously this always built a
+    # mean-pool head and failed to load attention-pool or paper-layout heads).
+    cls_head = ClassificationHead.from_state_dict(
+        torch.load(config.cls_head_path, map_location="cpu"),
+        llm_dim=llm.hidden_dim, rag_dim=config.embedder_dim, hidden_dim=config.cls_hidden_dim,
+    )
     cls_head.to(llm.device)
     cls_head.eval()
 
@@ -101,7 +101,7 @@ def _collect_logits(
     with torch.no_grad():
         # power2004 mirror has no "val" split; calibrate on the configured split
         # (a single scalar T barely overfits, so this is a safe practical choice).
-        for pair in balanced_mimic_stream(config, split=config.mimic_split, max_pairs=val_pairs):
+        for pair in balanced_mimic_stream(config, split=config.mimic_split, max_pairs=val_pairs, part="heldout"):
             try:
                 first_sentence = pair.report.split(".")[0].strip()[:150]
                 retrieved = retriever.query(first_sentence, k=config.retrieval_top_k)

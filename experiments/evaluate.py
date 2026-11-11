@@ -90,7 +90,7 @@ def _run_robustness(
     result: dict[str, float] = {}
     for aug_name, aug_fn in augmentations.items():
         print(f"  [robustness] {aug_name} ({n_samples} samples)...")
-        stream = balanced_mimic_stream(config, split="train", max_pairs=n_samples)
+        stream = balanced_mimic_stream(config, split="train", max_pairs=n_samples, part="heldout")
         aug_stream = _augment_stream(stream, aug_fn)
         res = run_eval_stream(pipeline, aug_stream, max_samples=n_samples)
         if not res:
@@ -386,7 +386,7 @@ def main() -> int:
 
     # ── Main evaluation ───────────────────────────────────────────────────────
     print(f"\n[eval] Main evaluation — {args.max_samples} balanced samples...")
-    stream = balanced_mimic_stream(CONFIG, split="train", max_pairs=args.max_samples)
+    stream = balanced_mimic_stream(CONFIG, split="train", max_pairs=args.max_samples, part="heldout")
     results = run_eval_stream(pipeline, iter(stream), max_samples=args.max_samples, tta_fns=tta_fns)
 
     if not results:
@@ -398,7 +398,7 @@ def main() -> int:
     if args.rag_ablation:
         print(f"\n[eval] RAG ablation — {args.max_samples} samples (no retrieval)...")
         abl_stream = balanced_mimic_stream(
-            CONFIG, split="train", max_pairs=args.max_samples
+            CONFIG, split="train", max_pairs=args.max_samples, part="heldout"
         )
         abl_results = run_eval_stream(
             pipeline, iter(abl_stream), max_samples=args.max_samples, no_rag=True
